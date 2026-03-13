@@ -123,7 +123,13 @@ async def mcp_endpoint(scope, receive, send):
 
 async def on_startup():
     """Create database tables on startup (idempotent — uses CREATE IF NOT EXISTS)."""
-    await create_tables()
+    try:
+        await create_tables()
+        print("✓ Database tables ready")
+    except Exception as e:
+        # Log but don't crash — app should still serve /health even if DB is slow
+        print(f"⚠ Database startup warning: {e}")
+        print("  App will continue — DB may not be ready yet")
 
 
 app = Starlette(

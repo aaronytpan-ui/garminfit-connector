@@ -11,9 +11,21 @@ from sqlalchemy import String, Text, DateTime, Boolean
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-# Railway sets DATABASE_URL as postgres:// — asyncpg needs postgresql+asyncpg://
+# Railway may set DATABASE_URL as either postgres:// or postgresql://
+# asyncpg requires the postgresql+asyncpg:// scheme — normalize all variants
 _raw_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./dev.db")
-DATABASE_URL = _raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+if _raw_url.startswith("postgres://"):
+    # Old Heroku/Railway style: postgres://user:pass@host/db
+    DATABASE_URL = "postgresql+asyncpg://" + _raw_url[len("postgres://"):]
+elif _raw_url.startswith("postgresql://") and "+asyncpg" not in _raw_url:
+    # New Railway style: postgresql://user:pass@host/db
+    DATABASE_URL = "postgresql+asyncpg://" + _raw_url[len("postgresql://"):]
+else:
+    # Already correct (postgresql+asyncpg://) or local SQLite fallback
+    DATABASE_URL = _raw_url
+
+print(f"[DB] Connecting with scheme: {DATABASE_URL.split('://')[0]}")
 
 engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

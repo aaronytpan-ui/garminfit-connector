@@ -46,12 +46,14 @@ class GarminMCPRouter:
     VALID_SUBPATHS = {"/sse", "/messages/", "/messages"}
 
     def __init__(self):
-        # Get the Starlette ASGI app from FastMCP
-        self._mcp_app = mcp.sse_app()
+        # Lazy-initialized on first request so import errors are caught cleanly
+        self._mcp_app = None
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in ("http", "websocket"):
-            # Pass lifespan events through to the MCP app
+            # Pass lifespan events through to the MCP app (lazy-init if needed)
+            if self._mcp_app is None:
+                self._mcp_app = mcp.sse_app()
             await self._mcp_app(scope, receive, send)
             return
 
@@ -81,6 +83,10 @@ class GarminMCPRouter:
         if sub_path not in self.VALID_SUBPATHS:
             await self._not_found(scope, receive, send)
             return
+
+        # Lazy-initialize the MCP ASGI app on first request
+        if self._mcp_app is None:
+            self._mcp_app = mcp.sse_app()
 
         # Set the ContextVar so MCP tools can read the user's identity
         token_ctx = user_access_token_var.set(access_token)
@@ -123,6 +129,11 @@ async def mcp_endpoint(scope, receive, send):
 
 async def on_startup():
     """Create database tables on startup (idempotent — uses CREATE IF NOT EXISTS)."""
+    import os
+    print("✓ garminfit-connector starting up")
+    print(f"  DATABASE_URL set: {'yes' if os.environ.get('DATABASE_URL') else 'NO — using SQLite fallback'}")
+    print(f"  TOKEN_ENCRYPTION_KEY set: {'yes' if os.environ.get('TOKEN_ENCRYPTION_KEY') else 'NO — will crash on setup'}")
+    print(f"  APP_BASE_URL: {os.environ.get('APP_BASE_URL', '(not set — using request host)')}")
     try:
         await create_tables()
         print("✓ Database tables ready")

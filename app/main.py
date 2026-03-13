@@ -72,8 +72,19 @@ class GarminMCPRouter:
             # lifespan context; nothing to do here.
             return
 
-        path: str = scope.get("path", "")
+        full_path: str = scope.get("path", "")
         method: str = scope.get("method", "")
+
+        # Starlette's Mount updates scope["root_path"] but does NOT strip the
+        # mount prefix from scope["path"].  We must strip it ourselves so the
+        # router sees /{token} instead of /mcp/{token}.
+        root_path: str = scope.get("root_path", "")
+        if root_path and full_path.startswith(root_path):
+            path = full_path[len(root_path):]
+            if not path:
+                path = "/"
+        else:
+            path = full_path
 
         if not path.startswith("/"):
             await self._not_found(scope, receive, send)
@@ -112,7 +123,7 @@ class GarminMCPRouter:
         content_type_hdr = headers.get(b"content-type", b"").decode()
         session_id_hdr = headers.get(b"mcp-session-id", b"").decode()
         print(
-            f"[MCP] {method} {path} -> transport={transport} token={access_token[:8]}... "
+            f"[MCP] {method} {full_path} (local={path}) -> transport={transport} token={access_token[:8]}... "
             f"accept={accept_hdr!r} content-type={content_type_hdr!r} "
             f"session-id={session_id_hdr[:8] + '...' if session_id_hdr else '(none)'}"
         )

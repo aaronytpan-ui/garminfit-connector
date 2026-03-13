@@ -3,9 +3,10 @@ Starlette application entry point.
 
 Key components:
   1. GarminMCPRouter — custom ASGI router that:
-       - Parses {access_token} from /mcp/{access_token}/sse and /mcp/{access_token}/messages/
+       - Parses {access_token} from /mcp/{access_token} (Streamable HTTP)
+         and from /mcp/{access_token}/sse + /mcp/{access_token}/messages/ (SSE)
        - Sets user_access_token_var ContextVar so MCP tools can identify the user
-       - Rewrites the path to /sse or /messages/ before delegating to FastMCP's SSE app
+       - Rewrites the path before delegating to FastMCP's transport app
 
   2. setup_routes — HTML setup/disconnect pages and /api/* JSON endpoints
 
@@ -13,7 +14,13 @@ Key components:
 
 The app is served by uvicorn:
   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+Transport support:
+  - Streamable HTTP (MCP 2025-03): POST/GET /mcp/{token}   ← Claude.ai uses this
+  - SSE (legacy):                  GET /mcp/{token}/sse    ← kept for compatibility
 """
+
+import traceback
 
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
@@ -30,43 +37,48 @@ from app.setup_routes import setup_routes
 
 class GarminMCPRouter:
     """
-    Routes requests from:
-      /{access_token}/sse         → FastMCP SSE endpoint (GET)
-      /{access_token}/messages/   → FastMCP messages endpoint (POST)
+    Routes requests from (after Starlette Mount("/mcp", ...) strips "/mcp"):
 
-    NOTE: This router is mounted at /mcp via Starlette's Mount("/mcp", ...).
-    Starlette strips the "/mcp" prefix before passing scope to this app,
-    so paths arrive here as "/{access_token}/sse", not "/mcp/{access_token}/sse".
+      /{access_token}           → FastMCP Streamable HTTP (GET + POST, MCP 2025-03)
+      /{access_token}/sse       → FastMCP SSE endpoint (GET, legacy)
+      /{access_token}/messages/ → FastMCP SSE messages (POST, legacy)
 
     Extracts {access_token} from the URL, sets it in user_access_token_var
     (a contextvars.ContextVar), rewrites the path, and delegates to the
-    FastMCP Starlette SSE app.
+    appropriate FastMCP ASGI app.
     """
 
-    VALID_SUBPATHS = {"/sse", "/messages/", "/messages"}
+    # Legacy SSE subpaths (kept for backward compat)
+    SSE_SUBPATHS = {"/sse", "/messages/", "/messages"}
+
+    # Streamable HTTP uses FastMCP's internal path (/mcp is default)
+    STREAMABLE_HTTP_INTERNAL_PATH = "/mcp"
 
     def __init__(self):
-        # Lazy-initialized on first request so import errors are caught cleanly
-        self._mcp_app = None
+        # Lazy-initialized on first request
+        self._sse_app = None             # FastMCP SSE transport (legacy)
+        self._streamable_app = None      # FastMCP Streamable HTTP transport (current)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in ("http", "websocket"):
-            # Pass lifespan events through to the MCP app (lazy-init if needed)
-            if self._mcp_app is None:
-                self._mcp_app = mcp.sse_app()
-            await self._mcp_app(scope, receive, send)
+            # Lifespan — initialize and pass through to streamable app
+            if self._streamable_app is None:
+                self._streamable_app = mcp.streamable_http_app()
+            await self._streamable_app(scope, receive, send)
             return
 
         path: str = scope.get("path", "")
+        method: str = scope.get("method", "")
 
-        # Starlette's Mount("/mcp", ...) strips "/mcp" before calling us.
-        # Paths arrive as "/{access_token}/sse" or "/{access_token}/messages/".
-        # Strip the leading "/" to get "{access_token}/sse".
+        # After Mount("/mcp", ...) strips the prefix, paths arrive as:
+        #   /{token}           → Streamable HTTP
+        #   /{token}/sse       → SSE GET
+        #   /{token}/messages/ → SSE messages POST
         if not path.startswith("/"):
             await self._not_found(scope, receive, send)
             return
 
-        rest = path[1:]  # strip leading "/" → "{access_token}/sse"
+        rest = path[1:]   # strip leading "/" → "{token}" or "{token}/sse"
 
         if not rest:
             await self._not_found(scope, receive, send)
@@ -75,48 +87,55 @@ class GarminMCPRouter:
         slash_idx = rest.find("/")
 
         if slash_idx == -1:
-            # No subpath — invalid
-            await self._not_found(scope, receive, send)
-            return
-
-        access_token = rest[:slash_idx]
-        sub_path = rest[slash_idx:]  # "/sse" or "/messages/"
+            # No subpath — this is /{token} → Streamable HTTP
+            access_token = rest
+            transport = "streamable"
+            internal_path = self.STREAMABLE_HTTP_INTERNAL_PATH
+        else:
+            # Has subpath — SSE legacy routing
+            access_token = rest[:slash_idx]
+            sub_path = rest[slash_idx:]   # "/sse", "/messages/", etc.
+            if sub_path not in self.SSE_SUBPATHS:
+                await self._not_found(scope, receive, send)
+                return
+            transport = "sse"
+            internal_path = sub_path
 
         if not access_token:
             await self._not_found(scope, receive, send)
             return
 
-        if sub_path not in self.VALID_SUBPATHS:
-            await self._not_found(scope, receive, send)
-            return
+        print(f"[MCP] {method} {path} → transport={transport} token={access_token[:8]}...")
 
-        # Lazy-initialize the MCP ASGI app on first request
-        if self._mcp_app is None:
-            self._mcp_app = mcp.sse_app()
+        # Lazy-initialize the appropriate transport app
+        if transport == "streamable":
+            if self._streamable_app is None:
+                self._streamable_app = mcp.streamable_http_app()
+            app = self._streamable_app
+        else:
+            if self._sse_app is None:
+                self._sse_app = mcp.sse_app()
+            app = self._sse_app
 
         # Set the ContextVar so MCP tools can read the user's identity
         token_ctx = user_access_token_var.set(access_token)
 
-        # Rewrite path so FastMCP sees /sse or /messages/
+        # Rewrite path for the inner app
         new_scope = dict(scope)
-        new_scope["path"] = sub_path
-        new_scope["raw_path"] = sub_path.encode()
+        new_scope["path"] = internal_path
+        new_scope["raw_path"] = internal_path.encode()
 
-        # Critical: include access_token in root_path so FastMCP advertises the
-        # correct messages URL back to the client.
-        #
-        # Starlette's Mount("/mcp", ...) already appended "/mcp" to root_path.
-        # FastMCP constructs the messages endpoint as:
-        #   full_path = scope["root_path"] + self._endpoint
-        #               (e.g., "/mcp" + "/messages/" → "/mcp/messages/")
-        # Without the token that URL is unroutable — our router needs the token
-        # in the path to set the ContextVar. Adding "/{access_token}" here makes
-        # FastMCP advertise "/mcp/{access_token}/messages/?session_id=..." which
-        # our router can parse correctly on the subsequent POST.
-        new_scope["root_path"] = scope.get("root_path", "").rstrip("/") + f"/{access_token}"
+        if transport == "sse":
+            # For SSE, include access_token in root_path so FastMCP advertises
+            # the correct messages URL: /mcp/{token}/messages/?session_id=...
+            new_scope["root_path"] = scope.get("root_path", "").rstrip("/") + f"/{access_token}"
 
         try:
-            await self._mcp_app(new_scope, receive, send)
+            await app(new_scope, receive, send)
+        except Exception as e:
+            print(f"[MCP] ERROR in transport={transport}: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            raise
         finally:
             user_access_token_var.reset(token_ctx)
 
@@ -141,11 +160,6 @@ class GarminMCPRouter:
 _mcp_router = GarminMCPRouter()
 
 
-async def mcp_endpoint(scope, receive, send):
-    """ASGI passthrough to GarminMCPRouter (used in Starlette Mount)."""
-    await _mcp_router(scope, receive, send)
-
-
 async def on_startup():
     """Create database tables on startup (idempotent — uses CREATE IF NOT EXISTS)."""
     import os
@@ -157,7 +171,6 @@ async def on_startup():
         await create_tables()
         print("✓ Database tables ready")
     except Exception as e:
-        # Log but don't crash — app should still serve /health even if DB is slow
         print(f"⚠ Database startup warning: {e}")
         print("  App will continue — DB may not be ready yet")
 

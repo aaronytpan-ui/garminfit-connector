@@ -40,6 +40,7 @@ import sys
 
 from starlette.applications import Starlette
 from starlette.routing import Mount
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 # ---------------------------------------------------------------------------
 # Force stdout to be unbuffered so print() appears immediately in Railway logs
@@ -75,13 +76,16 @@ class GarminMCPRouter:
         self._sse_app = None     # FastMCP SSE transport (legacy) — lazy-init
 
     async def __call__(self, scope, receive, send):
+        full_path: str = scope.get("path", "")
+        method: str = scope.get("method", "")
+
+        # Log every call, even non-HTTP, so we know the router is reachable
+        log.warning("[MCP-ROUTER] called type=%s method=%s path=%s", scope["type"], method, full_path)
+
         if scope["type"] not in ("http", "websocket"):
             # Lifespan events: the session manager is managed by the outer
             # lifespan context; nothing to do here.
             return
-
-        full_path: str = scope.get("path", "")
-        method: str = scope.get("method", "")
 
         # Starlette's Mount updates scope["root_path"] but does NOT strip the
         # mount prefix from scope["path"].  We must strip it ourselves so the
@@ -94,13 +98,12 @@ class GarminMCPRouter:
         else:
             path = full_path
 
-        if not path.startswith("/"):
-            await self._not_found(scope, receive, send)
-            return
+        rest = path.lstrip("/")   # "{token}" or "{token}/sse" or ""
 
-        rest = path[1:]   # strip leading "/" -> "{token}" or "{token}/sse"
+        log.warning("[MCP-ROUTER] root_path=%r → local_path=%r rest=%r", root_path, path, rest[:20])
 
         if not rest:
+            log.warning("[MCP-ROUTER] 404 empty rest")
             await self._not_found(scope, receive, send)
             return
 
@@ -116,12 +119,14 @@ class GarminMCPRouter:
             access_token = rest[:slash_idx]
             sub_path = rest[slash_idx:]   # "/sse", "/messages/", etc.
             if sub_path not in self.SSE_SUBPATHS:
+                log.warning("[MCP-ROUTER] 404 unknown sub_path=%r", sub_path)
                 await self._not_found(scope, receive, send)
                 return
             transport = "sse"
             internal_path = sub_path
 
         if not access_token:
+            log.warning("[MCP-ROUTER] 404 empty access_token")
             await self._not_found(scope, receive, send)
             return
 
@@ -217,6 +222,26 @@ class GarminMCPRouter:
 _mcp_router = GarminMCPRouter()
 
 
+# ---------------------------------------------------------------------------
+# Raw ASGI middleware: logs every request BEFORE Starlette routing touches it
+# ---------------------------------------------------------------------------
+
+class RequestLogMiddleware:
+    """Logs the raw path/method of every HTTP request before any routing."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            log.warning(
+                "[RAW] %s %s",
+                scope.get("method", "?"),
+                scope.get("path", "?"),
+            )
+        await self._app(scope, receive, send)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app):
     """
@@ -252,7 +277,7 @@ async def lifespan(app):
     log.warning("MCP session manager stopped")
 
 
-app = Starlette(
+_starlette = Starlette(
     lifespan=lifespan,
     routes=[
         # Web pages + API endpoints
@@ -262,3 +287,6 @@ app = Starlette(
         Mount("/mcp", app=_mcp_router),
     ],
 )
+
+# Wrap with raw-request logger so we can see every request before routing
+app = RequestLogMiddleware(_starlette)

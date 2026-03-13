@@ -229,26 +229,38 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
         try:
             # garth.sso.resume_login takes the client_state from step 1 and the MFA code,
             # returns (oauth1_token, oauth2_token) on success
-            oauth1_token, oauth2_token = await loop.run_in_executor(
+            resume_result = await loop.run_in_executor(
                 None,
                 lambda: garth_resume_login(client_state, mfa_code),
             )
+            print(f"[MFA] resume_login result type={type(resume_result).__name__}, repr={resume_result!r:.300}")
+
+            # Unpack and inject into garth's global client, then serialize
+            oauth1_token, oauth2_token = resume_result
+            garth.client.oauth1_token = oauth1_token
+            garth.client.oauth2_token = oauth2_token
+            token_b64 = garth.client.dumps()
+            print(f"[MFA] token serialized OK, length={len(token_b64)}")
+
         except Exception as e:
+            print(f"[MFA] completion error: {type(e).__name__}: {e}")
             return JSONResponse(
                 {"error": f"MFA authentication failed: {e}. Check the code and try again."},
                 status_code=400,
             )
 
-        # Inject the tokens into garth's global client and serialize them
-        garth.client.oauth1_token = oauth1_token
-        garth.client.oauth2_token = oauth2_token
-        token_b64 = garth.client.dumps()
-
     # DB save and optional display_name lookup — outside the lock
     display_name = await _get_display_name(token_b64)
-    mcp_url = await _save_user_and_get_url(
-        request, token_b64, display_name, session.garmin_email
-    )
+    try:
+        mcp_url = await _save_user_and_get_url(
+            request, token_b64, display_name, session.garmin_email
+        )
+    except Exception as e:
+        print(f"[MFA] save_user error: {type(e).__name__}: {e}")
+        return JSONResponse(
+            {"error": f"Garmin auth succeeded but failed to save: {e}"},
+            status_code=500,
+        )
     return JSONResponse({"mcp_url": mcp_url})
 
 

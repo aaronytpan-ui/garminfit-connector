@@ -60,7 +60,7 @@ from app.setup_routes import setup_routes
 
 class GarminMCPRouter:
     """
-    Routes requests from (after Starlette Mount("/mcp", ...) strips "/mcp"):
+    Routes requests from (after Starlette Mount("/connect", ...) strips "/connect"):
 
       /{access_token}           → FastMCP Streamable HTTP (MCP 2025-03)
       /{access_token}/sse       → FastMCP SSE endpoint (legacy)
@@ -283,8 +283,8 @@ _starlette = Starlette(
         # Web pages + API endpoints
         *setup_routes,
 
-        # MCP connector -- everything under /mcp/ goes to GarminMCPRouter
-        Mount("/mcp", app=_mcp_router),
+        # MCP connector -- everything under /connect/ goes to GarminMCPRouter
+        Mount("/connect", app=_mcp_router),
     ],
 )
 

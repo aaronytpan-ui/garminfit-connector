@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app.garmin_adapter import get_garmin_handler, save_refreshed_tokens
 
@@ -110,6 +111,10 @@ mcp = FastMCP(
     "Garmin Fitness",
     json_response=True,     # Plain JSON responses, no SSE streaming
     stateless_http=True,    # Fresh server per request — no session state needed
+    # Disable MCP SDK's DNS-rebinding check: we're already on HTTPS (TLS prevents
+    # DNS rebinding at the network layer), and allowing arbitrary hosts is required
+    # for a public connector that Claude.ai connects to from external servers.
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     instructions=(
         "Tools for querying the connected user's Garmin Connect fitness data. "
         "All date parameters use YYYY-MM-DD format. "

@@ -283,10 +283,11 @@ _starlette = Starlette(
         # Web pages + API endpoints
         *setup_routes,
 
-        # MCP connector -- everything under /api/garmin/ goes to GarminMCPRouter
-        # Note: /mcp/ and /connect/ are intercepted by Railway's proxy layer;
-        # /api/* is not restricted and routes correctly to this service.
-        Mount("/api/garmin", app=_mcp_router),
+        # MCP connector -- everything under /garmin/ goes to GarminMCPRouter
+        # Note: /mcp/ and /connect/ are intercepted by Railway's proxy layer.
+        # /api/* is also intercepted by Railway's edge on .up.railway.app domains
+        # (returns 421 Misdirected Request). Using /garmin/ avoids all conflicts.
+        Mount("/garmin", app=_mcp_router),
     ],
 )
 

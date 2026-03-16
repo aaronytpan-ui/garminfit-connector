@@ -1044,6 +1044,119 @@ class GarminDataHandler:
             logger.debug(f"HRV data not available: {e}")
             return {}
     
+    def _get_user_profile_number(self) -> Optional[str]:
+        """Get the user's profile number (displayName) needed for gear API calls."""
+        # garminconnect sets display_name after get_full_name() — reuse if set
+        if hasattr(self.client, 'display_name') and self.client.display_name:
+            return self.client.display_name
+        try:
+            profile = self.client.get_user_profile()
+            return profile.get('displayName') or profile.get('userId')
+        except Exception as e:
+            logger.debug(f"Could not fetch user profile number: {e}")
+            return None
+
+    def get_gear(self) -> List[Dict]:
+        """
+        Get all gear items (shoes, bikes, etc.) associated with the account.
+
+        Returns:
+            List of gear dictionaries with name, type, distance, and status.
+        """
+        self._ensure_authenticated()
+        self._ensure_display_name()
+        profile_number = self._get_user_profile_number()
+        if not profile_number:
+            logger.debug("Could not determine user profile number for gear lookup")
+            return []
+        try:
+            result = self.client.get_gear(profile_number)
+            if isinstance(result, list):
+                return result
+            if isinstance(result, dict):
+                return result.get('gearList', [result])
+            return []
+        except Exception as e:
+            logger.debug(f"Gear not available: {e}")
+            return []
+
+    def get_gear_stats(self, gear_uuid: str) -> Dict:
+        """
+        Get usage statistics for a specific gear item.
+
+        Args:
+            gear_uuid: The UUID of the gear item (from get_gear).
+
+        Returns:
+            Dictionary with total distance, activities, and time for the gear.
+        """
+        self._ensure_authenticated()
+        try:
+            return self.client.get_gear_stats(gear_uuid) or {}
+        except Exception as e:
+            logger.debug(f"Gear stats not available: {e}")
+            return {}
+
+    def get_gear_activities(self, gear_uuid: str, limit: int = 20) -> List[Dict]:
+        """
+        Get activities logged with a specific gear item.
+
+        Args:
+            gear_uuid: The UUID of the gear item.
+            limit: Maximum number of activities to return (default 20).
+
+        Returns:
+            List of activities that used this gear.
+        """
+        self._ensure_authenticated()
+        try:
+            result = self.client.get_gear_activities(gear_uuid, limit=limit)
+            return result if result else []
+        except Exception as e:
+            logger.debug(f"Gear activities not available: {e}")
+            return []
+
+    def get_activity_gear(self, activity_id: str) -> Dict:
+        """
+        Get gear used for a specific activity.
+
+        Args:
+            activity_id: The activity ID (from get_activities).
+
+        Returns:
+            Dictionary describing the gear used, or empty dict if none.
+        """
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_gear(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity gear not available: {e}")
+            return {}
+
+    def get_gear_defaults(self) -> List[Dict]:
+        """
+        Get default gear assignments by activity type.
+
+        Returns:
+            List of default gear rules (e.g., "use these shoes for running").
+        """
+        self._ensure_authenticated()
+        self._ensure_display_name()
+        profile_number = self._get_user_profile_number()
+        if not profile_number:
+            logger.debug("Could not determine user profile number for gear defaults")
+            return []
+        try:
+            result = self.client.get_gear_defaults(profile_number)
+            if isinstance(result, list):
+                return result
+            if isinstance(result, dict):
+                return result.get('gearDefaultList', [])
+            return []
+        except Exception as e:
+            logger.debug(f"Gear defaults not available: {e}")
+            return []
+
     def get_all_day_stress(self, date: Optional[str] = None) -> List[Dict]:
         """
         Get all-day stress measurements (every few minutes).

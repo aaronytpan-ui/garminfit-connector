@@ -1,5 +1,5 @@
 """
-FastMCP server with 16 Garmin data tools.
+FastMCP server with 21 Garmin data tools.
 
 All tools:
   - Read the user's access token from a contextvars.ContextVar set by GarminMCPRouter
@@ -13,6 +13,7 @@ Tool groupings:
   Group 3 — Training Performance: get_training_status, get_training_readiness, get_intensity_minutes
   Group 4 — Nutrition & Hydration: get_nutrition_log, get_hydration
   Group 5 — Comprehensive & Range: get_body_metrics, get_spo2_and_respiration, get_activities_by_date_range
+  Group 6 — Gear Tracking:     get_gear, get_gear_stats, get_gear_activities, get_activity_gear, get_gear_defaults
 """
 
 import asyncio
@@ -528,3 +529,94 @@ async def get_activities_by_date_range(start_date: str, end_date: str) -> str:
         return f"No activities found between {start_date} and {end_date}."
     import json
     return json.dumps(result, indent=2, default=str)
+
+
+# ===========================================================================
+# GROUP 6 — Gear Tracking
+# ===========================================================================
+
+@mcp.tool()
+async def get_gear() -> str:
+    """
+    Returns all gear items registered in Garmin Connect: shoes, bikes,
+    and other equipment. Each item shows the gear name, type, status
+    (active/inactive), total distance logged, and number of activities.
+
+    Use this to see what equipment is tracked and to get gear UUIDs
+    needed for get_gear_stats and get_gear_activities.
+
+    Returns:
+        List of all gear with name, type, distance, and activity count.
+    """
+    import json
+    result = await _call("get_gear")
+    return result
+
+
+@mcp.tool()
+async def get_gear_stats(gear_uuid: str) -> str:
+    """
+    Returns usage statistics for a specific piece of gear: total distance,
+    total time, and number of activities.
+
+    Useful for tracking shoe mileage (when to replace) or bike maintenance.
+
+    Args:
+        gear_uuid: The UUID of the gear item. Get this from get_gear.
+
+    Returns:
+        Total distance, time, and activity count for the gear item.
+    """
+    import json
+    result = await _call("get_gear_stats", gear_uuid)
+    return result
+
+
+@mcp.tool()
+async def get_gear_activities(gear_uuid: str, limit: Optional[int] = 20) -> str:
+    """
+    Returns recent activities that used a specific piece of gear.
+
+    Args:
+        gear_uuid: The UUID of the gear item. Get this from get_gear.
+        limit: Maximum number of activities to return (default 20).
+
+    Returns:
+        List of activities using this gear, with date, type, and distance.
+    """
+    limit = max(1, min(100, limit or 20))
+    import json
+    result = await _call("get_gear_activities", gear_uuid, limit)
+    return result
+
+
+@mcp.tool()
+async def get_activity_gear(activity_id: str) -> str:
+    """
+    Returns the gear (shoes, bike, etc.) used for a specific activity.
+
+    Args:
+        activity_id: The Garmin activity ID. Get this from get_activities
+                     or get_activities_by_date_range (the "activityId" field).
+
+    Returns:
+        Gear details for the activity, or a message if no gear was logged.
+    """
+    import json
+    result = await _call("get_activity_gear", activity_id)
+    return result
+
+
+@mcp.tool()
+async def get_gear_defaults() -> str:
+    """
+    Returns default gear assignments by activity type — for example,
+    which shoes are automatically logged for running activities, or
+    which bike is used for cycling.
+
+    Returns:
+        List of default gear rules per activity type.
+    """
+    import json
+    result = await _call("get_gear_defaults")
+    return result

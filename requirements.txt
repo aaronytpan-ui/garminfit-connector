@@ -1,4 +1,4 @@
-garminconnect>=0.2.38
+garminconnect>=0.2.40
 garth>=0.5.0
 mcp[cli]>=1.0.0
 starlette>=0.36.0

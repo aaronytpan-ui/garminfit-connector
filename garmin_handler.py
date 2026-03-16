@@ -862,31 +862,31 @@ class GarminDataHandler:
             date = datetime.now().strftime("%Y-%m-%d")
         
         nutrition_data = {}
-        
-        # Try Method 1: Dedicated nutrition API endpoint
+
+        # Primary: garminconnect 0.2.40+ nutrition food log endpoint
         try:
-            # Some Garmin devices support a nutrition summary endpoint
-            data = self.client.get_nutrition_summary(date)
+            data = self.client.get_nutrition_daily_food_log(date)
             if data:
+                logger.info(f"Nutrition food log raw keys: {list(data.keys())}")
                 nutrition_data.update({
                     'date': date,
                     'calories_consumed': data.get('totalCalories', data.get('consumedCalories', 0)),
-                    'protein_g': data.get('totalProtein', 0),
-                    'carbs_g': data.get('totalCarbs', 0),
-                    'fat_g': data.get('totalFat', 0),
-                    'fiber_g': data.get('totalFiber', 0),
-                    'sugar_g': data.get('totalSugar', 0),
-                    'sodium_mg': data.get('totalSodium', 0),
-                    'water_ml': data.get('totalWater', 0)
+                    'protein_g': data.get('totalProtein', data.get('protein', 0)),
+                    'carbs_g': data.get('totalCarbs', data.get('carbs', 0)),
+                    'fat_g': data.get('totalFat', data.get('fat', 0)),
+                    'fiber_g': data.get('totalFiber', data.get('fiber', 0)),
+                    'sugar_g': data.get('totalSugar', data.get('sugar', 0)),
+                    'sodium_mg': data.get('totalSodium', data.get('sodium', 0)),
+                    'water_ml': data.get('totalWater', data.get('water', 0)),
                 })
-                logger.debug("Nutrition data loaded from get_nutrition_summary")
+                logger.debug("Nutrition data loaded from get_nutrition_daily_food_log")
                 return nutrition_data
         except AttributeError:
-            logger.debug("get_nutrition_summary method not available")
+            logger.debug("get_nutrition_daily_food_log method not available")
         except Exception as e:
-            logger.debug(f"get_nutrition_summary failed: {e}")
-        
-        # Try Method 2: Daily summary which sometimes includes nutrition
+            logger.debug(f"get_nutrition_daily_food_log failed: {e}")
+
+        # Fallback: Daily summary consumedCalories field
         try:
             summary = self.client.get_user_summary(date)
             if summary and 'consumedCalories' in summary:
@@ -898,8 +898,8 @@ class GarminDataHandler:
                 logger.debug("Basic nutrition data from user summary")
         except Exception as e:
             logger.debug(f"User summary nutrition failed: {e}")
-        
-        # Try Method 3: Stats endpoint
+
+        # Fallback: Stats endpoint
         try:
             stats = self.client.get_stats(date)
             if stats:
@@ -910,7 +910,7 @@ class GarminDataHandler:
                 logger.debug("Nutrition data from stats endpoint")
         except Exception as e:
             logger.debug(f"Stats endpoint nutrition failed: {e}")
-        
+
         return nutrition_data if nutrition_data else {}
     
     def get_food_log(self, date: Optional[str] = None) -> List[Dict]:
@@ -930,13 +930,16 @@ class GarminDataHandler:
             date = datetime.now().strftime("%Y-%m-%d")
         
         try:
-            # Try to get food log - this may be a newer API endpoint
-            food_log = self.client.get_food_log(date)
-            if food_log and isinstance(food_log, list):
-                return food_log
+            data = self.client.get_nutrition_daily_meals(date)
+            if data:
+                logger.info(f"Nutrition meals raw keys: {list(data.keys())}")
+                # Response is typically {"meals": [...]} or a list directly
+                meals = data.get('meals', data) if isinstance(data, dict) else data
+                if isinstance(meals, list):
+                    return meals
             return []
         except AttributeError:
-            logger.debug("get_food_log method not available in this version")
+            logger.debug("get_nutrition_daily_meals method not available")
             return []
         except Exception as e:
             logger.debug(f"Food log not available: {e}")
@@ -1124,8 +1127,11 @@ class GarminDataHandler:
                     context_parts.append("")
         
         if data_type == "sleep" or data_type == "all":
-            # Get sleep data
-            sleep = self.get_sleep_data()
+            # Garmin records sleep under the date the sleep *started*, which is
+            # yesterday for last night's sleep.  Using today's date returns
+            # tonight's sleep (which hasn't happened yet) and yields all zeros.
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            sleep = self.get_sleep_data(yesterday)
             if sleep and "dailySleepDTO" in sleep:
                 sleep_data = sleep["dailySleepDTO"]
                 context_parts.append("=== Last Night's Sleep ===")

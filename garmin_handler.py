@@ -867,10 +867,7 @@ class GarminDataHandler:
         try:
             data = self.client.get_nutrition_daily_food_log(date)
             if data:
-                logger.info(f"Nutrition food log raw keys: {list(data.keys())}")
                 content = data.get('dailyNutritionContent', {})
-                if content:
-                    logger.info(f"dailyNutritionContent keys: {list(content.keys())}")
                 nutrition_data.update({
                     'date': date,
                     'calories_consumed': content.get('calories', content.get('totalCalories', data.get('totalCalories', 0))),
@@ -938,7 +935,6 @@ class GarminDataHandler:
             if data:
                 meal_details = data.get('mealDetails', [])
                 if meal_details:
-                    logger.info(f"mealDetails sample keys: {list(meal_details[0].keys()) if meal_details and isinstance(meal_details[0], dict) else meal_details}")
                     return meal_details
             return []
         except AttributeError:
@@ -1226,11 +1222,11 @@ class GarminDataHandler:
             if food_log:
                 context_parts.append("=== Food Log ===")
                 context_parts.append(f"Number of meals logged: {len(food_log)}")
-                if food_log:
-                    logger.info(f"Sample meal keys: {list(food_log[0].keys()) if isinstance(food_log[0], dict) else food_log[0]}")
                 for i, meal in enumerate(food_log[:5], 1):  # Show up to 5 meals
-                    meal_name = meal.get('mealName', meal.get('name', meal.get('foodName', meal.get('mealTypeId', 'Unknown'))))
-                    meal_calories = meal.get('totalCalories', meal.get('calories', meal.get('kcal', 0)))
+                    meal_info = meal.get('meal', {})
+                    meal_name = meal_info.get('mealName', meal_info.get('name', meal.get('mealName', 'Unknown')))
+                    nutrition = meal.get('mealNutritionContent', {})
+                    meal_calories = nutrition.get('calories', meal.get('totalCalories', meal.get('calories', 0)))
                     context_parts.append(f"{i}. {meal_name} - {meal_calories} kcal")
                 context_parts.append("")
         

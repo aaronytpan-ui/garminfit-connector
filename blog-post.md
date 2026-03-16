@@ -12,6 +12,21 @@ Garmin Chat Connector is a companion to [Garmin Chat for Windows](https://github
 
 Garmin Chat Connector is the bridge for mobile (and web). Instead of a locally-running server, it is a hosted MCP endpoint in the cloud. Each user gets a private, token-protected URL that they paste into Claude, ChatGPT, or any other AI tool that supports custom MCP connectors.
 
+---
+
+## Already Using Garmin Chat for Windows? You're Going to Love This.
+
+If you use [Garmin Chat for Windows](https://github.com/rod-trent/GarminChatLocal) on your desktop, you already know how useful it is to have a natural language conversation with your Garmin data. Garmin Chat Connector brings that same experience to your phone — no new learning curve, no new app to install.
+
+Here's all it takes:
+
+1. **Set up the connector** — visit the setup page, enter your Garmin credentials, and get your personal MCP URL (takes about 60 seconds)
+2. **Open Claude or ChatGPT on your mobile device** — both apps are free to download on iOS and Android
+3. **Add the connector** — paste your MCP URL into the app's connector settings
+4. **Start chatting** — the same questions you ask on your desktop work identically on mobile
+
+That's it. The same 16 Garmin data tools you rely on in the desktop app are available on your phone, through the same AI assistants you already use. Whether you're at the gym, out for a run, or just checking in on your recovery between meetings — your Garmin data is always a question away.
+
 **Currently supported platforms:**
 
 | AI App | Supported | Notes |

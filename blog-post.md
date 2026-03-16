@@ -157,43 +157,6 @@ Each request is fully isolated. Multiple users can connect to the same instance 
 - All traffic is encrypted over **HTTPS**
 - Revoking your connection at `/disconnect` immediately deletes all associated tokens from the database
 
----
-
-## Self-Hosting
-
-The connector is fully open source and can be deployed on your own infrastructure if you'd prefer to keep everything in your control.
-
-**Requirements:**
-- Python 3.11+
-- PostgreSQL (or SQLite for local dev)
-- Railway, Render, Fly.io, or any cloud host that supports Python ASGI apps
-
-**Quick start:**
-
-```bash
-git clone https://github.com/rod-trent/garminfit-connector
-cd garminfit-connector
-
-pip install -r requirements.txt
-
-# Generate a Fernet encryption key
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-
-cp .env.example .env
-# Add your TOKEN_ENCRYPTION_KEY and DATABASE_URL to .env
-
-uvicorn app.main:app --reload --port 8000
-```
-
-Visit `http://localhost:8000/setup` to connect your Garmin account and test locally.
-
-**Railway deployment:**
-1. Fork the repo and connect it to a new Railway project
-2. Add the PostgreSQL plugin — `DATABASE_URL` is set automatically
-3. Set `TOKEN_ENCRYPTION_KEY` and `APP_BASE_URL` in the Railway environment variables
-4. Deploy — Railway detects the `Procfile` and starts the server automatically
-
----
 
 ## Frequently Asked Questions
 
@@ -207,7 +170,7 @@ Yes. The connector is designed for multi-user deployment. Each user gets their o
 Garmin OAuth tokens are automatically refreshed on every request. The updated tokens are saved back to the database, so your session stays active indefinitely under normal use.
 
 **Is this affiliated with Garmin?**
-No. This is an independent open-source project that uses the Garmin Connect API via the [`garth`](https://github.com/matin/garth) and [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) Python libraries.
+No. This is an independent project that uses the Garmin Connect API via the [`garth`](https://github.com/matin/garth) and [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) Python libraries.
 
 **What if something breaks or I have a question?**
 Head over to the [Garmin Chat Community Forums](https://github.com/rod-trent/Garmin-Chat-Forums/discussions) on GitHub Discussions — it's the best place to report issues, ask questions, and share what you're building.
@@ -226,7 +189,6 @@ No pressure — the connector works the same either way. But if you're going to 
 
 ## Links
 
-- **GitHub repository:** [github.com/rod-trent/garminfit-connector](https://github.com/rod-trent/garminfit-connector)
 - **Community & support:** [Garmin Chat Forums](https://github.com/rod-trent/Garmin-Chat-Forums/discussions)
 - **Desktop companion app:** [Garmin Chat for Windows](https://github.com/rod-trent/GarminChatLocal)
 - **Support the project:** [buy.stripe.com/bJe9AUeaYcdT46z1F75os00](https://buy.stripe.com/bJe9AUeaYcdT46z1F75os00)

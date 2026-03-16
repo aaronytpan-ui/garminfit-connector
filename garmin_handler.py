@@ -1045,15 +1045,25 @@ class GarminDataHandler:
             return {}
     
     def _get_user_profile_number(self) -> Optional[str]:
-        """Get the user's profile number (displayName) needed for gear API calls."""
-        # garminconnect sets display_name after get_full_name() — reuse if set
-        if hasattr(self.client, 'display_name') and self.client.display_name:
-            return self.client.display_name
+        """Get the numeric userProfilePk needed for gear API calls."""
         try:
-            profile = self.client.get_user_profile()
-            return profile.get('displayName') or profile.get('userId')
+            # The gear endpoint uses ?userProfilePk= which is a numeric ID,
+            # NOT the displayName username. Fetch it from the profile endpoint.
+            profile = self.client.garth.connectapi(
+                "/userprofile-service/userprofile/profile"
+            )
+            logger.info(f"Profile keys: {list(profile.keys()) if isinstance(profile, dict) else type(profile)}")
+            # Try common field names for the numeric profile PK
+            pk = (
+                profile.get('profileId') or
+                profile.get('userProfileId') or
+                profile.get('id') or
+                profile.get('userId')
+            )
+            logger.info(f"Profile PK resolved to: {pk}")
+            return str(pk) if pk else None
         except Exception as e:
-            logger.debug(f"Could not fetch user profile number: {e}")
+            logger.info(f"Could not fetch user profile PK: {e}")
             return None
 
     def get_gear(self) -> List[Dict]:

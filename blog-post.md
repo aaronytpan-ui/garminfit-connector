@@ -20,12 +20,13 @@ If you use [Garmin Chat for Windows](https://github.com/rod-trent/GarminChatLoca
 
 Here's all it takes:
 
-1. **Set up the connector** — visit the setup page, enter your Garmin credentials, and get your personal MCP URL (takes about 60 seconds)
-2. **Open Claude or ChatGPT on your mobile device** — both apps are free to download on iOS and Android
-3. **Add the connector** — paste your MCP URL into the app's connector settings
-4. **Start chatting** — the same questions you ask on your desktop work identically on mobile
+1. **Set up the connector once** — visit the setup page, enter your Garmin credentials, and get your personal MCP URL (takes about 60 seconds)
+2. **Add it to Claude or ChatGPT** — paste your MCP URL into the connector settings, from any device or browser
+3. **That's it** — the connector is tied to your account, not a specific device
 
-That's it. The same 16 Garmin data tools you rely on in the desktop app are available on your phone, through the same AI assistants you already use. Whether you're at the gym, out for a run, or just checking in on your recovery between meetings — your Garmin data is always a question away.
+Because the connector is registered at the account level in Claude and ChatGPT, **you only need to add it once**. Add it in a web browser on your PC and it's immediately available when you open the Claude or ChatGPT app on your phone — no extra steps, no re-configuring on mobile. Your Garmin data follows you everywhere your AI assistant does.
+
+The same 16 Garmin data tools you rely on in the desktop app are available on any device, through the same AI assistants you already use. Whether you're at the gym, out for a run, or just checking in on your recovery between meetings — your Garmin data is always a question away.
 
 **Currently supported platforms:**
 

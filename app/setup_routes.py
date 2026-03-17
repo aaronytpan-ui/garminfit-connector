@@ -765,8 +765,7 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
                         "prevents new connections for some older accounts (started ~March 16, 2026). "
                         "Your credentials are correct — this is a known issue on Garmin's side "
                         "that is not related to your MFA code or this app. "
-                        "Please try again in 24–48 hours. "
-                        "Status: github.com/matin/garth/issues"
+                        "Please try again in 24–48 hours."
                     ),
                     "restart_required": True,
                     "garmin_disruption": True,

@@ -46,8 +46,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
+import requests as _requests  # used only for OAUTH_CONSUMER pre-warm
+
 from garth import sso as garth_sso
-from garth.exc import GarthHTTPError
+from garth.exc import GarthException, GarthHTTPError
 from garth.http import Client as GarthClient
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
@@ -141,6 +143,31 @@ def _is_ip_blocked(exc: Exception) -> bool:
     """
     msg = str(exc)
     return "401" in msg and "sso/signin" in msg
+
+
+def _prewarm_oauth_consumer() -> None:
+    """
+    Blocking: fetch garth's OAuth consumer credentials from S3 if not cached.
+
+    GarminOAuth1Session.__init__ fetches these on first use — inside the
+    tight window after a CAS ticket is issued and before it's exchanged at
+    the preauthorized endpoint.  If the S3 round-trip takes 1–3 s and
+    Garmin's CAS ticket TTL is short, the ticket expires → 401.
+
+    We call this in a background executor thread as soon as we know MFA
+    is required, so the fetch is complete (and the result cached in the
+    garth_sso.OAUTH_CONSUMER module-level dict) well before the user
+    submits their code and resume_login() runs.
+    """
+    if garth_sso.OAUTH_CONSUMER:
+        return  # already cached from a previous login
+    try:
+        data = _requests.get(garth_sso.OAUTH_CONSUMER_URL, timeout=10).json()
+        garth_sso.OAUTH_CONSUMER.update(data)
+        print("[prewarm] OAUTH_CONSUMER cached successfully")
+    except Exception as exc:
+        # Non-fatal: resume_login will still try the fetch itself.
+        print(f"[prewarm] OAUTH_CONSUMER fetch failed (non-fatal): {exc}")
 
 
 def _extract_retry_after(exc: Exception, default: int = 1800) -> int:
@@ -399,6 +426,23 @@ async def api_setup_start(request: Request) -> JSONResponse:
     # --- Interpret result ---------------------------------------------------
 
     if result[0] == "needs_mfa":
+        # Kick off the OAUTH_CONSUMER pre-warm in the background NOW,
+        # while the user opens their authenticator app.
+        #
+        # Why: GarminOAuth1Session (used inside resume_login → _complete_login
+        # → get_oauth1_token) fetches OAuth consumer creds from S3 on its
+        # very first instantiation.  With return_on_mfa=True we never reach
+        # _complete_login during api_setup_start, so OAUTH_CONSUMER is always
+        # cold when resume_login runs.  That S3 fetch (1–3 s) happens inside
+        # the narrow window between the CAS ticket being issued (MFA submit)
+        # and it being exchanged (preauthorized call) — if the ticket TTL is
+        # short the ticket expires mid-flight → 401 at preauthorized.
+        #
+        # Pre-warming here guarantees the cache is hot before the user even
+        # finishes typing their 6-digit code.
+        if not garth_sso.OAUTH_CONSUMER:
+            loop.run_in_executor(_login_executor, _prewarm_oauth_consumer)
+
         # Store the garth client_state so resume_login() can complete it.
         client_state = result[1]
         session_id = create_mfa_session(
@@ -483,6 +527,15 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
     isolated_client = session.isolated_client
     loop = asyncio.get_event_loop()
 
+    # Belt-and-suspenders: ensure OAUTH_CONSUMER is cached before we call
+    # resume_login.  Normally the background pre-warm started in
+    # api_setup_start has 5–30 s to complete while the user reads their
+    # authenticator app.  This await is a safety net for the rare case
+    # where the user is extremely fast or the server just restarted.
+    if not garth_sso.OAUTH_CONSUMER:
+        print("[MFA] OAUTH_CONSUMER not cached yet — pre-warming now (blocking)")
+        await loop.run_in_executor(_login_executor, _prewarm_oauth_consumer)
+
     # resume_login() submits the MFA code to SSO, gets the CAS ticket, and
     # exchanges it for OAuth tokens in one uninterrupted synchronous call.
     # Because there is no gap between the MFA submission and the OAuth
@@ -508,8 +561,26 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
         print(f"[MFA] resume_login error: {type(e).__name__}: {e}")
         error_str = str(e)
 
-        # 401 typically means a wrong or already-used TOTP code.
-        if "401" in error_str:
+        # Wrong MFA code: handle_mfa POSTs the code, Garmin returns 200 with
+        # an error/retry page (not a ticket), _complete_login can't find
+        # "embed?ticket=" → GarthException.  No restart needed; same session
+        # is still valid and the user can try again with a fresh code.
+        if isinstance(e, GarthException) and "ticket" in error_str.lower():
+            return JSONResponse(
+                {
+                    "error": (
+                        "Garmin did not accept the MFA code — no session ticket was returned. "
+                        "Please enter the latest 6-digit code from your authenticator app "
+                        "and try again."
+                    ),
+                    "restart_required": False,
+                },
+                status_code=400,
+            )
+
+        # 401 at the MFA submission endpoint itself (verifyMFA) — also a bad code,
+        # but returned as a non-2xx HTTP status rather than an HTML error page.
+        if "401" in error_str and "verifyMFA" in error_str:
             return JSONResponse(
                 {
                     "error": (
@@ -517,6 +588,33 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
                         "Please enter the latest code from your authenticator app and try again."
                     ),
                     "restart_required": False,
+                },
+                status_code=400,
+            )
+
+        # 401 at the OAuth preauthorized endpoint — the CAS ticket was rejected.
+        # This means the code was correct but the ticket exchange failed, likely
+        # because OAUTH_CONSUMER wasn't cached in time or the ticket TTL elapsed.
+        # The session is consumed; the user must restart.
+        if "401" in error_str and "preauthorized" in error_str:
+            return JSONResponse(
+                {
+                    "error": (
+                        "Garmin's login session timed out during the OAuth token exchange. "
+                        "Your MFA code was correct. Please start the setup process again — "
+                        "the next attempt should succeed now that credentials are cached."
+                    ),
+                    "restart_required": True,
+                },
+                status_code=400,
+            )
+
+        # Catch-all 401 from any other endpoint.
+        if "401" in error_str:
+            return JSONResponse(
+                {
+                    "error": "Authentication rejected by Garmin. Please start the setup process again.",
+                    "restart_required": True,
                 },
                 status_code=400,
             )

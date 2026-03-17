@@ -246,15 +246,14 @@ async def api_setup_start(request: Request) -> JSONResponse:
 
         isolated_client = GarthClient()
 
-        # Add 429 to the retry list so Garmin's OAuth rate limiter is handled
-        # automatically.  GarminOAuth1Session (used for the preauthorized token
-        # exchange) mounts its parent's HTTPS adapter, so it inherits this config.
-        # backoff_factor=2 → waits 2s, 4s, 8s between retries; respect_retry_after_header
-        # is True by default in urllib3 Retry, so Retry-After headers are honoured.
+        # Retry only on transient server errors — NOT on 429.
+        # Retrying a 429 burns more of Garmin's per-IP rate-limit budget and
+        # makes the ban window longer.  When we get 429 we fail fast, surface
+        # the Retry-After time to the user, and let them wait it out.
         isolated_client.configure(
-            status_forcelist=(408, 429, 500, 502, 503, 504),
-            retries=4,
-            backoff_factor=2.0,
+            status_forcelist=(408, 500, 502, 503, 504),
+            retries=3,
+            backoff_factor=1.0,
         )
 
         # sso.login(return_on_mfa=True) returns immediately in both cases:

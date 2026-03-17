@@ -5,8 +5,13 @@ Garmin Chat Connector — Local Setup Script
 Run this on your own computer to authenticate with Garmin
 and register your MCP URL with the Garmin Chat Connector.
 
-Why local?  Garmin's OAuth endpoints can be finicky from cloud servers.
-Running locally uses your own machine and IP, which tends to be more reliable.
+Why local?  Running the Garmin OAuth flow locally can be more reliable than
+going through the web server, particularly for troubleshooting.
+
+Note: As of ~March 16, 2026, Garmin is experiencing a backend disruption that
+prevents new logins for some older accounts. If you get a 401 error at the
+preauthorized step, please see: https://github.com/matin/garth/issues
+and try again in 24–48 hours.
 
 Usage:
     python local_setup.py
@@ -129,6 +134,18 @@ def _login_with_cookie_carry(client, email: str, password: str, debug: bool = Fa
         if not resp.ok:
             dbg(f"preauthorized error body: {resp.text[:400]!r}")
             dbg(f"preauthorized response headers: {dict(resp.headers)}")
+            if resp.status_code == 401:
+                raise Exception(
+                    f"401 Unauthorized at preauthorized endpoint.\n\n"
+                    f"  This is a known Garmin service disruption (started ~March 16, 2026)\n"
+                    f"  that affects older Garmin accounts. Your credentials are correct.\n"
+                    f"  There is nothing wrong with this script — Garmin's backend is rejecting\n"
+                    f"  the OAuth token exchange for legacy accounts.\n\n"
+                    f"  ➜ Please try again in 24–48 hours.\n"
+                    f"  ➜ Status: https://github.com/matin/garth/issues\n\n"
+                    f"  If you created your Garmin account after ~October 2025, this\n"
+                    f"  should not affect you — try running the script again."
+                )
         resp.raise_for_status()
 
         parsed = parse_qs(resp.text)

@@ -524,6 +524,25 @@ async def api_setup_start(request: Request) -> JSONResponse:
                     status_code=429,
                 )
 
+            # 401 at connectapi preauthorized — Garmin backend disruption for
+            # legacy accounts (started ~March 16, 2026, tracked in garth #198/#199).
+            # This happens for non-MFA accounts whose entire login runs synchronously
+            # inside garth_sso.login() before returning to us.
+            if "401" in str(e) and "preauthorized" in str(e):
+                return JSONResponse(
+                    {
+                        "error": (
+                            "⚠️ Garmin is currently experiencing a service disruption that "
+                            "prevents new connections for some older accounts (started ~March 16, 2026). "
+                            "Your credentials are correct — this is a known issue on Garmin's side. "
+                            "Please try again in 24–48 hours. "
+                            "Status: github.com/matin/garth/issues"
+                        ),
+                        "garmin_disruption": True,
+                    },
+                    status_code=400,
+                )
+
             return JSONResponse(
                 {"error": f"Authentication failed: {e}"},
                 status_code=400,
@@ -729,19 +748,28 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
                 status_code=400,
             )
 
-        # 401 at the OAuth preauthorized endpoint — the CAS ticket was rejected.
-        # This means the code was correct but the ticket exchange failed, likely
-        # because OAUTH_CONSUMER wasn't cached in time or the ticket TTL elapsed.
-        # The session is consumed; the user must restart.
+        # 401 at the OAuth preauthorized endpoint.
+        # As of ~March 16, 2026 Garmin rolled out a backend change that causes
+        # the preauthorized ticket exchange to return 401 for some legacy
+        # (older) Garmin accounts — regardless of MFA status, library version,
+        # IP address, or any client-side change.  New accounts (created ~Oct
+        # 2025 or later) are unaffected.  This is confirmed by multiple
+        # independent reporters and is tracked in garth issue #198 and #199.
+        # There is nothing the user or this server can do to work around it
+        # until Garmin completes their backend migration.
         if "401" in error_str and "preauthorized" in error_str:
             return JSONResponse(
                 {
                     "error": (
-                        "Garmin's login session timed out during the OAuth token exchange. "
-                        "Your MFA code was correct. Please start the setup process again — "
-                        "the next attempt should succeed now that credentials are cached."
+                        "⚠️ Garmin is currently experiencing a service disruption that "
+                        "prevents new connections for some older accounts (started ~March 16, 2026). "
+                        "Your credentials are correct — this is a known issue on Garmin's side "
+                        "that is not related to your MFA code or this app. "
+                        "Please try again in 24–48 hours. "
+                        "Status: github.com/matin/garth/issues"
                     ),
                     "restart_required": True,
+                    "garmin_disruption": True,
                 },
                 status_code=400,
             )

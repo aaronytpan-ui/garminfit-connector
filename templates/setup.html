@@ -120,6 +120,18 @@
     }
     .footer-links a { color: #7080B8; text-decoration: none; }
     .footer-links a:hover { color: #A0B0D8; text-decoration: underline; }
+    .disruption-banner {
+      background: #1A100D;
+      border: 1px solid #4A2E1E;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      font-size: 0.83rem;
+      color: #D98060;
+      margin-bottom: 1.25rem;
+      line-height: 1.55;
+    }
+    .disruption-banner strong { color: #F0A070; }
+    .disruption-banner a { color: #D98060; }
   </style>
 </head>
 <body>
@@ -127,6 +139,15 @@
     <div class="logo"><img src="/static/icon.ico" alt="Garmin Chat Connector" /></div>
     <h1>Garmin Chat Connector</h1>
     <p class="subtitle">Enter your Garmin Connect credentials to get a personal MCP URL for Claude, ChatGPT, and other AI chat tools.</p>
+
+    <div class="disruption-banner" id="disruption-banner">
+      🚧 <strong>Garmin service disruption (started ~March 16, 2026):</strong>
+      Some older Garmin accounts cannot connect right now due to a change on Garmin's backend.
+      New accounts and recently-created accounts are unaffected.
+      If you get a 401 error, please check
+      <a href="https://github.com/matin/garth/issues" target="_blank" rel="noopener">github.com/matin/garth/issues</a>
+      for the latest status and try again in 24–48 hours.
+    </div>
 
     <div class="security-note">
       🔒 <strong>Your credentials are never stored.</strong> We use them only to obtain OAuth tokens, which are encrypted and stored securely. You can disconnect at any time.
@@ -288,7 +309,12 @@
         }
 
         if (!resp.ok) {
-          showError('cred-error', data.error || 'Authentication failed. Check your credentials.');
+          const msg = data.error || 'Authentication failed. Check your credentials.';
+          showError('cred-error', msg);
+          if (data.garmin_disruption) {
+            // Hide the generic disruption banner — we've already surfaced a specific message.
+            document.getElementById('disruption-banner').style.display = 'none';
+          }
           btn.disabled = false;
           btn.innerHTML = 'Connect Garmin Account';
           return;

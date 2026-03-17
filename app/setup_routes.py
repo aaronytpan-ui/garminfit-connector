@@ -559,6 +559,34 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
         )
     except Exception as e:
         print(f"[MFA] resume_login error: {type(e).__name__}: {e}")
+
+        # ── Diagnostic logging ──────────────────────────────────────────────
+        # Log the last SSO response the client processed (should be the MFA
+        # verification response — the Success page with the embedded ticket).
+        # This tells us whether garth correctly received the ticket from Garmin.
+        try:
+            lr = getattr(isolated_client, "last_resp", None)
+            if lr is not None:
+                print(f"[MFA] last_resp URL    : {lr.url}")
+                print(f"[MFA] last_resp status : {lr.status_code}")
+                # Truncate to avoid flooding logs; first 600 chars is enough
+                print(f"[MFA] last_resp body   : {lr.text[:600]!r}")
+        except Exception as _le:
+            print(f"[MFA] could not log last_resp: {_le}")
+
+        # If the exception carries a response (requests.HTTPError from
+        # get_oauth1_token → resp.raise_for_status()), log that too.
+        try:
+            err_resp = getattr(e, "response", None)
+            if err_resp is not None:
+                print(f"[MFA] error response URL    : {err_resp.url}")
+                print(f"[MFA] error response status : {err_resp.status_code}")
+                print(f"[MFA] error response headers: {dict(err_resp.headers)}")
+                print(f"[MFA] error response body   : {err_resp.text[:600]!r}")
+        except Exception as _re:
+            print(f"[MFA] could not log error response: {_re}")
+        # ── End diagnostic logging ──────────────────────────────────────────
+
         error_str = str(e)
 
         # Wrong MFA code: handle_mfa POSTs the code, Garmin returns 200 with

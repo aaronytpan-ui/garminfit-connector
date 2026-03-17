@@ -347,27 +347,26 @@
         }
 
         if (!resp.ok) {
-          // restart_required means the login session is dead — redirect to step 1
+          // restart_required means the login session is dead — reset to step 1.
+          // IMPORTANT: keep the button disabled immediately so the user cannot
+          // resubmit against the now-consumed session while the timer is pending.
           if (data.restart_required) {
-            showError('mfa-error', data.error || 'Session expired. Please start over.');
-            btn.disabled = false;
-            btn.innerHTML = 'Verify &amp; Connect';
+            const msg = data.error || 'Session expired. Please enter your credentials again.';
+            showError('mfa-error', msg);
+            // Keep btn disabled, change label to signal something is happening
+            btn.innerHTML = '↩ Returning to login…';
+            document.getElementById('mfa-code').disabled = true;
 
-            // If Garmin also sent a rate-limit window, show a countdown on
-            // step 1 so the user knows exactly when they can try again.
-            if (data.rate_limited && data.retry_after) {
-              setTimeout(() => {
-                resetToStep1();
+            const delay = (data.rate_limited && data.retry_after) ? 2000 : 1500;
+            setTimeout(() => {
+              document.getElementById('mfa-code').disabled = false;
+              resetToStep1();
+              if (data.rate_limited && data.retry_after) {
                 startRateLimitCountdown(data.retry_after);
-              }, 4000);
-            } else {
-              // Give the user a moment to read the message, then auto-reset
-              setTimeout(() => {
-                resetToStep1();
-                showError('cred-error', '⚠️ ' + (data.error ||
-                  'Your login session expired. Please enter your credentials again to get a fresh code.'));
-              }, 4000);
-            }
+              } else {
+                showError('cred-error', '⚠️ ' + msg);
+              }
+            }, delay);
           } else {
             // Wrong/expired code — user can try a different code without restarting
             showError('mfa-error', data.error || 'Invalid MFA code. Please try again.');

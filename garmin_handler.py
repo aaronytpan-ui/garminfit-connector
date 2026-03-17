@@ -1077,17 +1077,19 @@ class GarminDataHandler:
         self._ensure_display_name()
         profile_number = self._get_user_profile_number()
         if not profile_number:
-            logger.debug("Could not determine user profile number for gear lookup")
+            logger.info("Could not determine user profile number for gear lookup")
             return []
+        logger.info(f"Calling get_gear with profile_number={profile_number}")
         try:
             result = self.client.get_gear(profile_number)
+            logger.info(f"get_gear raw result type={type(result)}, value={result}")
             if isinstance(result, list):
                 return result
             if isinstance(result, dict):
                 return result.get('gearList', [result])
             return []
         except Exception as e:
-            logger.debug(f"Gear not available: {e}")
+            logger.info(f"Gear API error: {e}")
             return []
 
     def get_gear_stats(self, gear_uuid: str) -> Dict:

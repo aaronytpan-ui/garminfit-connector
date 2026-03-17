@@ -221,6 +221,17 @@ async def api_setup_start(request: Request) -> JSONResponse:
 
         isolated_client = GarthClient()
 
+        # Add 429 to the retry list so Garmin's OAuth rate limiter is handled
+        # automatically.  GarminOAuth1Session (used for the preauthorized token
+        # exchange) mounts its parent's HTTPS adapter, so it inherits this config.
+        # backoff_factor=2 → waits 2s, 4s, 8s between retries; respect_retry_after_header
+        # is True by default in urllib3 Retry, so Retry-After headers are honoured.
+        isolated_client.configure(
+            status_forcelist=(408, 429, 500, 502, 503, 504),
+            retries=4,
+            backoff_factor=2.0,
+        )
+
         # sso.login(return_on_mfa=True) returns immediately in both cases:
         #   - No MFA:  (OAuth1Token, OAuth2Token)
         #   - MFA req: ("needs_mfa", {"signin_params": ..., "client": ...})
@@ -378,6 +389,22 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
                         "Please enter the latest code from your authenticator app and try again."
                     ),
                     "restart_required": False,
+                },
+                status_code=400,
+            )
+
+        # 429 here means all auto-retries were exhausted — Garmin's OAuth
+        # endpoint is still rate-limiting after several attempts.  A fresh
+        # login in ~60 seconds should succeed once the window resets.
+        if "429" in error_str:
+            return JSONResponse(
+                {
+                    "error": (
+                        "Garmin's servers are temporarily rate-limiting this connection. "
+                        "Your MFA code was accepted — please wait 60 seconds, then start "
+                        "the setup process again and re-enter your credentials."
+                    ),
+                    "restart_required": True,
                 },
                 status_code=400,
             )

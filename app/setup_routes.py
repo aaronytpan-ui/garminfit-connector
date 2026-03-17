@@ -40,6 +40,7 @@ users never share global garth state.
 """
 
 import asyncio
+import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -87,11 +88,59 @@ _setup_lock = asyncio.Lock()
 _MIN_LOGIN_INTERVAL_SECS: float = 10.0
 _last_login_time: float = 0.0
 
+# ---------------------------------------------------------------------------
+# Server-wide Garmin IP block state
+# ---------------------------------------------------------------------------
+# When Garmin returns a 429 or an IP-level 401 at the SSO signin endpoint,
+# we record a deadline here.  Every subsequent /api/setup/start request checks
+# this BEFORE acquiring the lock or touching Garmin at all.
+#
+# Without this gate, each new user who visits the setup page fires another
+# login attempt, which burns more of the per-IP rate-limit budget and makes
+# the ban window progressively longer — turning a 30-minute ban into hours.
+_garmin_blocked_until: float = 0.0   # time.monotonic() deadline
+_garmin_blocked_reason: str = ""
+
+
+def _set_garmin_block(seconds: float, reason: str = "") -> None:
+    """
+    Record that Garmin has rate-limited or blocked this server's IP.
+
+    Never shortens an existing block — if we already know we're blocked
+    for 30 minutes, a new 5-minute 429 doesn't reduce the deadline.
+    """
+    global _garmin_blocked_until, _garmin_blocked_reason
+    deadline = time.monotonic() + seconds
+    if deadline > _garmin_blocked_until:
+        _garmin_blocked_until = deadline
+        _garmin_blocked_reason = reason
+    print(
+        f"[rate-limit] Garmin IP block set: {reason!r} — "
+        f"{int(seconds)}s cooldown"
+    )
+
+
+def _garmin_block_remaining() -> float:
+    """Return seconds until the current block expires (0.0 if not blocked)."""
+    return max(0.0, _garmin_blocked_until - time.monotonic())
+
 
 def _is_rate_limited(exc: Exception) -> bool:
     """Return True if the exception is a Garmin SSO 429 / rate-limit error."""
     msg = str(exc)
     return "429" in msg or "Too Many Requests" in msg or "rate" in msg.lower()
+
+
+def _is_ip_blocked(exc: Exception) -> bool:
+    """
+    Return True if Garmin has blocked our IP at the SSO signin level.
+
+    A 401 at sso.garmin.com/sso/signin is NOT a wrong-password error
+    (garth surfaces credential failures differently); it means Garmin has
+    rejected the IP entirely — a more severe escalation than a 429.
+    """
+    msg = str(exc)
+    return "401" in msg and "sso/signin" in msg
 
 
 def _extract_retry_after(exc: Exception, default: int = 1800) -> int:
@@ -177,7 +226,16 @@ async def disconnect_page(request: Request) -> HTMLResponse:
 
 
 async def health_check(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "ok", "service": "garminfit-connector"})
+    remaining = _garmin_block_remaining()
+    payload: dict = {"status": "ok", "service": "garminfit-connector"}
+    if remaining > 0:
+        payload["garmin_ip_block"] = {
+            "blocked": True,
+            "reason": _garmin_blocked_reason,
+            "retry_after_secs": int(remaining),
+            "retry_after_mins": math.ceil(remaining / 60),
+        }
+    return JSONResponse(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +289,27 @@ async def api_setup_start(request: Request) -> JSONResponse:
     if not email or not password:
         return JSONResponse({"error": "Email and password are required"}, status_code=400)
 
+    # --- Global IP-block gate ----------------------------------------------
+    # Check BEFORE acquiring the lock or touching Garmin at all.
+    # Each failed attempt deepens the ban; this gate ensures we never
+    # retry while we already know the IP is blocked.
+    remaining = _garmin_block_remaining()
+    if remaining > 0:
+        mins = math.ceil(remaining / 60)
+        print(f"[setup] Rejecting login attempt — IP blocked for ~{mins}m ({_garmin_blocked_reason})")
+        return JSONResponse(
+            {
+                "error": (
+                    f"Garmin's servers are temporarily rate-limiting this server's IP "
+                    f"({_garmin_blocked_reason}). "
+                    f"Please try again in approximately {mins} minute{'s' if mins != 1 else ''}."
+                ),
+                "rate_limited": True,
+                "retry_after": int(remaining),
+            },
+            status_code=429,
+        )
+
     loop = asyncio.get_event_loop()
 
     # --- Rate-limit phase: hold lock only for the initial SSO request ------
@@ -272,21 +351,43 @@ async def api_setup_start(request: Request) -> JSONResponse:
         except Exception as e:
             print(f"[setup] sso.login error: {type(e).__name__}: {e}")
             _last_login_time = time.monotonic()
+
             if _is_rate_limited(e):
                 retry_after = _extract_retry_after(e)
+                _set_garmin_block(retry_after, "429 at OAuth preauthorized")
                 wait_mins = max(1, (retry_after + 59) // 60)
                 return JSONResponse(
                     {
                         "error": (
                             f"Garmin is rate-limiting new connections from this server's IP. "
-                            f"This window can last up to {wait_mins} minute(s). "
-                            f"Please wait and try again."
+                            f"No further attempts will be made for ~{wait_mins} minute(s) "
+                            f"to avoid extending the ban. Please try again later."
                         ),
                         "rate_limited": True,
                         "retry_after": retry_after,
                     },
                     status_code=429,
                 )
+
+            # 401 at the SSO signin URL means Garmin has escalated from
+            # rate-limiting the OAuth endpoint to blocking the IP at the
+            # SSO layer entirely — a more severe, longer ban.
+            if _is_ip_blocked(e):
+                _set_garmin_block(1800, "401 at SSO signin — IP-level block")
+                return JSONResponse(
+                    {
+                        "error": (
+                            "Garmin has temporarily blocked this server's IP from signing in. "
+                            "This is caused by too many recent failed attempts. "
+                            "No further attempts will be made for ~30 minutes. "
+                            "Please try again later."
+                        ),
+                        "rate_limited": True,
+                        "retry_after": 1800,
+                    },
+                    status_code=429,
+                )
+
             return JSONResponse(
                 {"error": f"Authentication failed: {e}"},
                 status_code=400,
@@ -420,21 +521,21 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
                 status_code=400,
             )
 
-        # 429 here means all auto-retries were exhausted — Garmin's OAuth
-        # preauthorized endpoint is still rate-limiting after several attempts.
-        # The CAS ticket used in the exchange is now consumed/expired, so the
-        # entire login must be restarted once the rate-limit window clears.
-        # Garmin's window can be 15–30 minutes; honour Retry-After if present.
+        # 429 at the OAuth preauthorized endpoint — set the server-wide block
+        # so no other user triggers another attempt while the ban is active.
+        # The CAS ticket is now consumed, so the entire login must restart
+        # once the window clears.
         if "429" in error_str:
             retry_after = _extract_retry_after(e)
+            _set_garmin_block(retry_after, "429 at OAuth preauthorized (MFA step)")
             wait_mins = max(1, (retry_after + 59) // 60)
             return JSONResponse(
                 {
                     "error": (
-                        f"Garmin's servers are rate-limiting this server's IP on the OAuth exchange. "
-                        f"This window typically lasts {wait_mins} minute(s). "
+                        f"Garmin's servers are rate-limiting this server's IP. "
+                        f"No further attempts will be made for ~{wait_mins} minute(s). "
                         f"Your MFA code was accepted but the token exchange could not complete. "
-                        f"Please wait {wait_mins} minute(s), then start the setup process again."
+                        f"Please try again in ~{wait_mins} minute(s)."
                     ),
                     "restart_required": True,
                     "rate_limited": True,

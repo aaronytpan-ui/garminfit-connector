@@ -1046,24 +1046,40 @@ class GarminDataHandler:
     
     def _get_user_profile_number(self) -> Optional[str]:
         """Get the numeric userProfilePk needed for gear API calls."""
+        # Try garth's cached profile first (populated during login)
         try:
-            # The gear endpoint uses ?userProfilePk= which is a numeric ID,
-            # NOT the displayName username. Fetch it from the profile endpoint.
-            profile = self.client.garth.connectapi(
-                "/userprofile-service/userprofile/profile"
+            profile = self.client.garth.profile
+            if isinstance(profile, dict):
+                pk = (
+                    profile.get('profileId') or
+                    profile.get('userProfileId') or
+                    profile.get('id') or
+                    profile.get('userId')
+                )
+                if pk:
+                    logger.info(f"Profile PK from garth.profile: {pk}")
+                    return str(pk)
+                logger.info(f"garth.profile keys: {list(profile.keys())}")
+        except Exception as e:
+            logger.info(f"garth.profile not available: {e}")
+
+        # Fallback: user-settings endpoint
+        try:
+            settings = self.client.garth.connectapi(
+                "/userprofile-service/userprofile/user-settings"
             )
-            logger.info(f"Profile keys: {list(profile.keys()) if isinstance(profile, dict) else type(profile)}")
-            # Try common field names for the numeric profile PK
+            logger.info(f"User settings keys: {list(settings.keys()) if isinstance(settings, dict) else type(settings)}")
+            user_data = settings.get('userData', settings) if isinstance(settings, dict) else {}
             pk = (
-                profile.get('profileId') or
-                profile.get('userProfileId') or
-                profile.get('id') or
-                profile.get('userId')
+                user_data.get('profileId') or
+                user_data.get('userProfileId') or
+                user_data.get('id') or
+                user_data.get('userId')
             )
-            logger.info(f"Profile PK resolved to: {pk}")
+            logger.info(f"Profile PK from user-settings: {pk}")
             return str(pk) if pk else None
         except Exception as e:
-            logger.info(f"Could not fetch user profile PK: {e}")
+            logger.info(f"Could not fetch user profile PK from user-settings: {e}")
             return None
 
     def get_gear(self) -> List[Dict]:

@@ -13,27 +13,22 @@ Endpoints:
 
 All API responses are JSON. HTML pages use Jinja2 templates.
 
-MFA design (v2 — garth return_on_mfa)
---------------------------------------
-garth 0.6+ provides sso.login(return_on_mfa=True) which returns immediately
-with a client_state dict when MFA is required, and sso.resume_login() which
-completes the flow given that state + the user's code.
+MFA design (v3 — cookie-carrying preauthorized exchange)
+---------------------------------------------------------
+garth's GarminOAuth1Session copies the retry adapter and proxies from
+client.sess but NOT the cookies.  In a real browser, sso.garmin.com cookies
+are sent to connectapi.garmin.com automatically because both sit under the
+.garmin.com parent domain.  For MFA-enabled accounts Garmin's preauthorized
+endpoint validates the MFA session cookie; without it the exchange returns
+401.  Non-MFA accounts have no MFA cookie so the check is skipped → they
+work fine with garth's default behaviour.
 
-This replaces the old MFABridge pattern that kept a thread blocked at
-prompt_mfa() while the user typed.  The old approach raced against the CAS
-service ticket TTL: the SSO session was held open across two HTTP round-trips
-(server→browser and browser→server), and if the ticket expired before the
-OAuth preauthorized exchange ran, Garmin returned 401.
-
-New flow:
-  1. api_setup_start calls sso.login(..., return_on_mfa=True) in a thread.
-     If MFA is needed, it returns ("needs_mfa", client_state) immediately —
-     no thread is left blocking.  We store client_state and return
-     {mfa_required: true, session_id} to the browser.
-  2. api_setup_mfa retrieves the stored client_state and calls
-     sso.resume_login(client_state, mfa_code) in a thread.  This submits
-     the code to Garmin's SSO, gets the ticket, and exchanges it for OAuth
-     tokens — all in one atomic blocking call with no added latency.
+Fix (_resume_login_with_cookies below): after handle_mfa() updates
+client.last_resp with the Success page (and the MFA session cookie is now
+live in client.sess.cookies), we extract the CAS ticket and make the
+preauthorized request using an OAuth1Session that explicitly carries
+client.sess.cookies.  Everything else (OAUTH_CONSUMER signing, exchange
+for OAuth2) is unchanged.
 
 Each login uses its own isolated garth.http.Client instance, so concurrent
 users never share global garth state.
@@ -42,13 +37,17 @@ users never share global garth state.
 import asyncio
 import math
 import os
+import re as _re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from urllib.parse import parse_qs
 
 import requests as _requests  # used only for OAUTH_CONSUMER pre-warm
+from requests_oauthlib import OAuth1Session as _OAuth1Session
 
 from garth import sso as garth_sso
+from garth.auth_tokens import OAuth1Token as _OAuth1Token
 from garth.exc import GarthException, GarthHTTPError
 from garth.http import Client as GarthClient
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -143,6 +142,85 @@ def _is_ip_blocked(exc: Exception) -> bool:
     """
     msg = str(exc)
     return "401" in msg and "sso/signin" in msg
+
+
+def _resume_login_with_cookies(
+    client_state: dict,
+    mfa_code: str,
+) -> tuple:
+    """
+    Complete an MFA login, carrying SSO session cookies into the OAuth
+    preauthorized token exchange.
+
+    garth's built-in GarminOAuth1Session copies the retry adapter and
+    proxies from client.sess but intentionally omits cookies — which is
+    fine for non-MFA accounts.  For MFA accounts Garmin's preauthorized
+    endpoint on connectapi.garmin.com validates the MFA session cookie that
+    was set by the verifyMFA call on sso.garmin.com.  Because both hosts
+    share the .garmin.com parent domain a real browser sends those cookies
+    automatically; garth does not.  Result: 401 for every MFA account.
+
+    This function replicates garth's resume_login() step-by-step but creates
+    its own OAuth1Session and explicitly copies client.sess.cookies before
+    making the preauthorized GET, matching what a browser would send.
+    """
+    client = client_state["client"]
+    signin_params = client_state["signin_params"]
+
+    # ── Step 1: submit MFA code (identical to garth's handle_mfa) ──────────
+    garth_sso.handle_mfa(client, signin_params, lambda: mfa_code)
+    # client.last_resp is now the verifyMFA Success page (200).
+    # The MFA session cookie is now live in client.sess.cookies.
+
+    # ── Step 2: extract CAS ticket from the Success page ───────────────────
+    m = _re.search(r'embed\?ticket=([^"]+)"', client.last_resp.text)
+    if not m:
+        raise GarthException("Couldn't find ticket in response")
+    ticket = m.group(1)
+    print(f"[MFA-preauth] ticket extracted: {ticket[:30]}...")
+
+    # ── Step 3: exchange ticket — carry SSO cookies into OAuth1Session ──────
+    # Ensure OAUTH_CONSUMER is populated (pre-warm should have done this).
+    if not garth_sso.OAUTH_CONSUMER:
+        _prewarm_oauth_consumer()
+
+    sess = _OAuth1Session(
+        garth_sso.OAUTH_CONSUMER["consumer_key"],
+        garth_sso.OAUTH_CONSUMER["consumer_secret"],
+    )
+    # Copy ALL cookies from the SSO session — this is the critical difference
+    # vs garth's GarminOAuth1Session which copies adapter/proxies but not cookies.
+    sess.cookies.update(client.sess.cookies)
+    sess.mount("https://", client.sess.adapters["https://"])
+    sess.proxies = client.sess.proxies
+    sess.verify = client.sess.verify
+
+    url = (
+        f"https://connectapi.{client.domain}/oauth-service/oauth/"
+        f"preauthorized?ticket={ticket}"
+        f"&login-url=https://sso.{client.domain}/sso/embed"
+        f"&accepts-mfa-tokens=true"
+    )
+    resp = sess.get(
+        url,
+        headers=garth_sso.USER_AGENT,
+        timeout=client.timeout,
+    )
+    print(
+        f"[MFA-preauth] preauthorized → HTTP {resp.status_code}  "
+        f"cookies_sent={len(sess.cookies)}  "
+        f"body_preview={resp.text[:120]!r}"
+    )
+    resp.raise_for_status()
+
+    parsed = parse_qs(resp.text)
+    token = {k: v[0] for k, v in parsed.items()}
+    oauth1 = _OAuth1Token(domain=client.domain, **token)
+
+    # ── Step 4: exchange OAuth1 → OAuth2 (same as garth's exchange()) ───────
+    oauth2 = garth_sso.exchange(oauth1, client)
+
+    return oauth1, oauth2
 
 
 def _prewarm_oauth_consumer() -> None:
@@ -544,7 +622,7 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
         oauth1_token, oauth2_token = await asyncio.wait_for(
             loop.run_in_executor(
                 _login_executor,
-                lambda: garth_sso.resume_login(client_state, mfa_code),
+                lambda: _resume_login_with_cookies(client_state, mfa_code),
             ),
             timeout=60,
         )

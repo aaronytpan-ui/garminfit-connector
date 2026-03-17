@@ -647,21 +647,32 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
                 status_code=400,
             )
 
-        # 429 at the OAuth preauthorized endpoint — set the server-wide block
-        # so no other user triggers another attempt while the ban is active.
-        # The CAS ticket is now consumed, so the entire login must restart
-        # once the window clears.
+        # 429 anywhere during resume_login — Cloudflare is blocking this
+        # server's IP from the Garmin SSO endpoint (verifyMFA or preauthorized).
+        # Set the server-wide block so subsequent requests are rejected at the
+        # gate rather than burning more of the rate-limit budget.
         if "429" in error_str:
             retry_after = _extract_retry_after(e)
-            _set_garmin_block(retry_after, "429 at OAuth preauthorized (MFA step)")
+            # Identify which endpoint was blocked for a more precise reason string.
+            if "verifyMFA" in error_str:
+                block_reason = "429 at verifyMFA — Cloudflare block on MFA endpoint"
+                user_detail = (
+                    "Cloudflare (Garmin's CDN) is blocking MFA authentication "
+                    "requests from this server's IP address."
+                )
+            else:
+                block_reason = "429 at OAuth preauthorized"
+                user_detail = (
+                    "Garmin's OAuth endpoint is rate-limiting this server's IP."
+                )
+            _set_garmin_block(retry_after, block_reason)
             wait_mins = max(1, (retry_after + 59) // 60)
             return JSONResponse(
                 {
                     "error": (
-                        f"Garmin's servers are rate-limiting this server's IP. "
+                        f"{user_detail} "
                         f"No further attempts will be made for ~{wait_mins} minute(s). "
-                        f"Your MFA code was accepted but the token exchange could not complete. "
-                        f"Please try again in ~{wait_mins} minute(s)."
+                        f"Please try again later."
                     ),
                     "restart_required": True,
                     "rate_limited": True,

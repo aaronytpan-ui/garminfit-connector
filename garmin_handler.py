@@ -1188,10 +1188,10 @@ class GarminDataHandler:
     def get_all_day_stress(self, date: Optional[str] = None) -> List[Dict]:
         """
         Get all-day stress measurements (every few minutes).
-        
+
         Args:
             date: Date in YYYY-MM-DD format (defaults to today)
-            
+
         Returns:
             List of stress readings throughout the day
         """
@@ -1207,7 +1207,285 @@ class GarminDataHandler:
             logger.debug(f"All-day stress not available: {e}")
             return []
 
-    
+    # -----------------------------------------------------------------------
+    # Body & Health
+    # -----------------------------------------------------------------------
+
+    def get_resting_heart_rate(self, date: Optional[str] = None) -> Dict:
+        """Get resting heart rate for a specific date."""
+        self._ensure_authenticated()
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_rhr_day(date) or {}
+        except Exception as e:
+            logger.debug(f"Resting heart rate not available: {e}")
+            return {}
+
+    def get_body_battery_events(self, date: Optional[str] = None) -> List[Dict]:
+        """Get body battery charge/drain events throughout the day."""
+        self._ensure_authenticated()
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_body_battery_events(date) or []
+        except Exception as e:
+            logger.debug(f"Body battery events not available: {e}")
+            return []
+
+    def get_weigh_ins(self, start_date: str, end_date: str) -> Dict:
+        """Get weight log entries over a date range."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_weigh_ins(start_date, end_date) or {}
+        except Exception as e:
+            logger.debug(f"Weigh-ins not available: {e}")
+            return {}
+
+    def get_daily_weigh_ins(self, date: Optional[str] = None) -> Dict:
+        """Get weight entries for a specific date."""
+        self._ensure_authenticated()
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_daily_weigh_ins(date) or {}
+        except Exception as e:
+            logger.debug(f"Daily weigh-ins not available: {e}")
+            return {}
+
+    def get_blood_pressure(self, start_date: str, end_date: Optional[str] = None) -> Dict:
+        """Get blood pressure readings over a date range."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_blood_pressure(start_date, end_date) or {}
+        except Exception as e:
+            logger.debug(f"Blood pressure not available: {e}")
+            return {}
+
+    # -----------------------------------------------------------------------
+    # Weekly Trends
+    # -----------------------------------------------------------------------
+
+    def get_weekly_steps(self, end_date: Optional[str] = None, weeks: int = 12) -> List[Dict]:
+        """Get weekly step totals for the past N weeks ending on end_date."""
+        self._ensure_authenticated()
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_weekly_steps(end_date, weeks) or []
+        except Exception as e:
+            logger.debug(f"Weekly steps not available: {e}")
+            return []
+
+    def get_weekly_stress(self, end_date: Optional[str] = None, weeks: int = 12) -> List[Dict]:
+        """Get weekly stress averages for the past N weeks ending on end_date."""
+        self._ensure_authenticated()
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_weekly_stress(end_date, weeks) or []
+        except Exception as e:
+            logger.debug(f"Weekly stress not available: {e}")
+            return []
+
+    def get_weekly_intensity_minutes(self, start_date: str, end_date: str) -> List[Dict]:
+        """Get weekly intensity minutes over a date range."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_weekly_intensity_minutes(start_date, end_date) or []
+        except Exception as e:
+            logger.debug(f"Weekly intensity minutes not available: {e}")
+            return []
+
+    # -----------------------------------------------------------------------
+    # Advanced Performance
+    # -----------------------------------------------------------------------
+
+    def get_race_predictions(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+        """Get predicted finish times for 5K, 10K, half marathon, and full marathon."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_race_predictions(start_date, end_date) or {}
+        except Exception as e:
+            logger.debug(f"Race predictions not available: {e}")
+            return {}
+
+    def get_endurance_score(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+        """Get Garmin endurance score over a date range."""
+        self._ensure_authenticated()
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=28)).strftime("%Y-%m-%d")
+        try:
+            return self.client.get_endurance_score(start_date, end_date) or {}
+        except Exception as e:
+            logger.debug(f"Endurance score not available: {e}")
+            return {}
+
+    def get_hill_score(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+        """Get hill climbing performance score."""
+        self._ensure_authenticated()
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=28)).strftime("%Y-%m-%d")
+        try:
+            return self.client.get_hill_score(start_date, end_date) or {}
+        except Exception as e:
+            logger.debug(f"Hill score not available: {e}")
+            return {}
+
+    def get_lactate_threshold(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+        """Get lactate threshold pace and heart rate."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_lactate_threshold(start_date=start_date, end_date=end_date) or {}
+        except Exception as e:
+            logger.debug(f"Lactate threshold not available: {e}")
+            return {}
+
+    def get_cycling_ftp(self) -> Dict:
+        """Get Functional Threshold Power (FTP) for cycling."""
+        self._ensure_authenticated()
+        try:
+            result = self.client.get_cycling_ftp()
+            if isinstance(result, list):
+                return result[0] if result else {}
+            return result or {}
+        except Exception as e:
+            logger.debug(f"Cycling FTP not available: {e}")
+            return {}
+
+    def get_running_tolerance(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict]:
+        """Get running load tolerance data."""
+        self._ensure_authenticated()
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=28)).strftime("%Y-%m-%d")
+        try:
+            return self.client.get_running_tolerance(start_date, end_date) or []
+        except Exception as e:
+            logger.debug(f"Running tolerance not available: {e}")
+            return []
+
+    def get_fitness_age(self, date: Optional[str] = None) -> Dict:
+        """Get fitness age data for a specific date."""
+        self._ensure_authenticated()
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_fitnessage_data(date) or {}
+        except Exception as e:
+            logger.debug(f"Fitness age not available: {e}")
+            return {}
+
+    # -----------------------------------------------------------------------
+    # Activity Details
+    # -----------------------------------------------------------------------
+
+    def get_activity_details(self, activity_id: str) -> Dict:
+        """Get full GPS/metric timeseries for an activity."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_details(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity details not available: {e}")
+            return {}
+
+    def get_activity_splits(self, activity_id: str) -> Dict:
+        """Get lap splits for an activity."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_splits(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity splits not available: {e}")
+            return {}
+
+    def get_activity_hr_zones(self, activity_id: str) -> Dict:
+        """Get time spent in each heart rate zone for an activity."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_hr_in_timezones(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity HR zones not available: {e}")
+            return {}
+
+    def get_activity_power_zones(self, activity_id: str) -> Dict:
+        """Get time spent in each power zone for an activity (cycling)."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_power_in_timezones(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity power zones not available: {e}")
+            return {}
+
+    def get_activity_exercise_sets(self, activity_id: str) -> Dict:
+        """Get exercise sets/reps for a strength training activity."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_exercise_sets(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity exercise sets not available: {e}")
+            return {}
+
+    def get_activity_weather(self, activity_id: str) -> Dict:
+        """Get weather conditions recorded during an activity."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_activity_weather(activity_id) or {}
+        except Exception as e:
+            logger.debug(f"Activity weather not available: {e}")
+            return {}
+
+    # -----------------------------------------------------------------------
+    # Goals & Achievements
+    # -----------------------------------------------------------------------
+
+    def get_personal_records(self) -> Dict:
+        """Get all-time personal records."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_personal_record() or {}
+        except Exception as e:
+            logger.debug(f"Personal records not available: {e}")
+            return {}
+
+    def get_earned_badges(self) -> List[Dict]:
+        """Get earned badges and completed challenges."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_earned_badges() or []
+        except Exception as e:
+            logger.debug(f"Earned badges not available: {e}")
+            return []
+
+    # -----------------------------------------------------------------------
+    # Devices
+    # -----------------------------------------------------------------------
+
+    def get_devices(self) -> List[Dict]:
+        """Get list of connected Garmin devices."""
+        self._ensure_authenticated()
+        try:
+            return self.client.get_devices() or []
+        except Exception as e:
+            logger.debug(f"Devices not available: {e}")
+            return []
+
+    # -----------------------------------------------------------------------
+    # Nutrition Details
+    # -----------------------------------------------------------------------
+
+    def get_nutrition_meals(self, date: Optional[str] = None) -> Dict:
+        """Get per-meal nutrition breakdown for a date."""
+        self._ensure_authenticated()
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            return self.client.get_nutrition_daily_meals(date) or {}
+        except Exception as e:
+            logger.debug(f"Nutrition meals not available: {e}")
+            return {}
+
+
     def format_data_for_context(self, data_type: str = "summary", activity_limit: int = 5) -> str:
         """
         Format Garmin data into a readable string for LLM context.

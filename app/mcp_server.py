@@ -1,5 +1,5 @@
 """
-FastMCP server with 21 Garmin data tools.
+FastMCP server with 38 Garmin data tools.
 
 All tools:
   - Read the user's access token from a contextvars.ContextVar set by GarminMCPRouter
@@ -8,12 +8,21 @@ All tools:
   - Return formatted strings suitable for Claude to read and summarize
 
 Tool groupings:
-  Group 1 — Daily Overview:     get_health_snapshot, get_today_summary, get_sleep_summary, get_activities
-  Group 2 — Recovery & Wellness: get_body_battery, get_stress_summary, get_hrv_status, get_heart_rate
-  Group 3 — Training Performance: get_training_status, get_training_readiness, get_intensity_minutes
-  Group 4 — Nutrition & Hydration: get_nutrition_log, get_hydration
-  Group 5 — Comprehensive & Range: get_body_metrics, get_spo2_and_respiration, get_activities_by_date_range
-  Group 6 — Gear Tracking:     get_gear, get_gear_stats, get_gear_activities, get_activity_gear, get_gear_defaults
+  Group 1  — Daily Overview:          get_health_snapshot, get_today_summary, get_sleep_summary, get_activities
+  Group 2  — Recovery & Wellness:     get_body_battery, get_stress_summary, get_hrv_status, get_heart_rate
+  Group 3  — Training Performance:    get_training_status, get_training_readiness, get_intensity_minutes
+  Group 4  — Nutrition & Hydration:   get_nutrition_log, get_hydration
+  Group 5  — Comprehensive & Range:   get_body_metrics, get_spo2_and_respiration, get_activities_by_date_range
+  Group 6  — Gear Tracking:           get_gear, get_gear_stats, get_gear_activities, get_activity_gear, get_gear_defaults
+  Group 7  — Activity Details:        get_activity_details, get_activity_splits, get_activity_hr_zones,
+                                       get_activity_power_zones, get_activity_exercise_sets, get_activity_weather
+  Group 8  — Advanced Performance:    get_race_predictions, get_endurance_score, get_hill_score,
+                                       get_lactate_threshold, get_cycling_ftp, get_running_tolerance, get_fitness_age
+  Group 9  — Body & Health:           get_resting_heart_rate, get_body_battery_events, get_weigh_ins, get_blood_pressure
+  Group 10 — Weekly Trends:           get_weekly_step_trends, get_weekly_stress_trends, get_weekly_intensity_trends
+  Group 11 — Goals & Achievements:    get_personal_records, get_earned_badges
+  Group 12 — Devices:                 get_devices
+  Group 13 — Nutrition Details:       get_nutrition_meals
 """
 
 import asyncio
@@ -619,4 +628,550 @@ async def get_gear_defaults() -> str:
     """
     import json
     result = await _call("get_gear_defaults")
+    return result
+
+
+# ===========================================================================
+# GROUP 7 — Activity Details
+# ===========================================================================
+
+@mcp.tool()
+async def get_activity_details(activity_id: str) -> str:
+    """
+    Returns the full GPS track and per-second/per-lap metric timeseries
+    for a single activity: pace, heart rate, elevation, cadence, power, etc.
+
+    This is the most detailed view of a single activity. Use for post-activity
+    analysis or when the user asks about a specific run, ride, or workout.
+
+    Args:
+        activity_id: Garmin activity ID (the "activityId" field from get_activities).
+
+    Returns:
+        Detailed activity metrics and GPS data.
+    """
+    import json
+    result = await _call("get_activity_details", activity_id)
+    return result
+
+
+@mcp.tool()
+async def get_activity_splits(activity_id: str) -> str:
+    """
+    Returns lap/split data for a single activity: distance, duration,
+    average pace, average heart rate, and elevation for each lap.
+
+    Useful for analysing pacing strategy or comparing effort across laps.
+
+    Args:
+        activity_id: Garmin activity ID (the "activityId" field from get_activities).
+
+    Returns:
+        Per-lap split metrics for the activity.
+    """
+    import json
+    result = await _call("get_activity_splits", activity_id)
+    return result
+
+
+@mcp.tool()
+async def get_activity_hr_zones(activity_id: str) -> str:
+    """
+    Returns time spent in each heart rate training zone for a single activity.
+
+    Zones are typically: Zone 1 (easy/recovery), Zone 2 (aerobic base),
+    Zone 3 (tempo), Zone 4 (threshold), Zone 5 (max/VO2 max).
+
+    Args:
+        activity_id: Garmin activity ID (the "activityId" field from get_activities).
+
+    Returns:
+        Duration in each HR zone for the activity.
+    """
+    import json
+    result = await _call("get_activity_hr_zones", activity_id)
+    return result
+
+
+@mcp.tool()
+async def get_activity_power_zones(activity_id: str) -> str:
+    """
+    Returns time spent in each power training zone for a single cycling activity.
+
+    Power zones are relative to the athlete's FTP (Functional Threshold Power).
+    Requires a power meter on the bike.
+
+    Args:
+        activity_id: Garmin activity ID (the "activityId" field from get_activities).
+
+    Returns:
+        Duration in each power zone for the activity, or a message if no power data.
+    """
+    import json
+    result = await _call("get_activity_power_zones", activity_id)
+    return result
+
+
+@mcp.tool()
+async def get_activity_exercise_sets(activity_id: str) -> str:
+    """
+    Returns exercise sets and reps for a strength training activity.
+
+    Shows each exercise performed, number of sets, reps per set,
+    and weight used. Only populated for strength/gym activities.
+
+    Args:
+        activity_id: Garmin activity ID (the "activityId" field from get_activities).
+
+    Returns:
+        Exercise sets, reps, and weights for a strength training activity.
+    """
+    import json
+    result = await _call("get_activity_exercise_sets", activity_id)
+    return result
+
+
+@mcp.tool()
+async def get_activity_weather(activity_id: str) -> str:
+    """
+    Returns weather conditions recorded at the start of an activity:
+    temperature, humidity, wind speed, and weather description.
+
+    Args:
+        activity_id: Garmin activity ID (the "activityId" field from get_activities).
+
+    Returns:
+        Weather conditions during the activity.
+    """
+    import json
+    result = await _call("get_activity_weather", activity_id)
+    return result
+
+
+# ===========================================================================
+# GROUP 8 — Advanced Performance Metrics
+# ===========================================================================
+
+@mcp.tool()
+async def get_race_predictions(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns Garmin's predicted finish times for common race distances:
+    5K, 10K, half marathon, and full marathon.
+
+    Predictions are based on recent training, VO2 Max, and running economy.
+    Requires sufficient recent running activity for accuracy.
+
+    Args:
+        start_date: Optional start date in YYYY-MM-DD format.
+        end_date: Optional end date in YYYY-MM-DD format.
+
+    Returns:
+        Predicted finish times for 5K, 10K, half marathon, and marathon.
+    """
+    import json
+    result = await _call("get_race_predictions", start_date, end_date)
+    return result
+
+
+@mcp.tool()
+async def get_endurance_score(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns Garmin's endurance score — a measure of aerobic base fitness
+    built up from sustained moderate-to-hard training over time.
+
+    Higher scores indicate greater capacity for long-duration efforts.
+    Requires a compatible Garmin device.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format. Defaults to 28 days ago.
+        end_date: Optional end date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Endurance score and trend data.
+    """
+    import json
+    result = await _call("get_endurance_score", start_date, end_date)
+    return result
+
+
+@mcp.tool()
+async def get_hill_score(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns Garmin's hill score — a metric reflecting climbing fitness
+    based on power output and heart rate during uphill efforts.
+
+    Higher scores indicate better ability to handle elevation gain.
+    Requires a compatible Garmin device.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format. Defaults to 28 days ago.
+        end_date: Optional end date in YYYY-MM-DD format.
+
+    Returns:
+        Hill score and trend data.
+    """
+    import json
+    result = await _call("get_hill_score", start_date, end_date)
+    return result
+
+
+@mcp.tool()
+async def get_lactate_threshold(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns lactate threshold data: the heart rate and pace at which
+    lactate begins to accumulate rapidly in the blood.
+
+    Training at or near lactate threshold improves race pace.
+    Requires a compatible Garmin device with running dynamics or
+    a recent Lactate Threshold test activity.
+
+    Args:
+        start_date: Optional start date in YYYY-MM-DD format.
+        end_date: Optional end date in YYYY-MM-DD format.
+
+    Returns:
+        Lactate threshold heart rate and pace estimate.
+    """
+    import json
+    result = await _call("get_lactate_threshold", start_date, end_date)
+    return result
+
+
+@mcp.tool()
+async def get_cycling_ftp() -> str:
+    """
+    Returns the athlete's Functional Threshold Power (FTP) for cycling —
+    the maximum power (in watts) a cyclist can sustain for approximately 1 hour.
+
+    FTP is used to set training zones for power-based cycling workouts.
+    Requires a power meter and a compatible Garmin device.
+
+    Returns:
+        Current FTP value in watts.
+    """
+    import json
+    result = await _call("get_cycling_ftp")
+    return result
+
+
+@mcp.tool()
+async def get_running_tolerance(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns running load tolerance data — how well the body is adapting
+    to recent running training volume and intensity.
+
+    Helps identify if training load is increasing too quickly (injury risk)
+    or if there's room to increase volume.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format. Defaults to 28 days ago.
+        end_date: End date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Running tolerance metrics and weekly aggregation.
+    """
+    import json
+    result = await _call("get_running_tolerance", start_date, end_date)
+    return result
+
+
+@mcp.tool()
+async def get_fitness_age(date: Optional[str] = None) -> str:
+    """
+    Returns Garmin's fitness age estimate — the biological age that
+    corresponds to the user's current fitness level.
+
+    A fitness age lower than chronological age indicates above-average
+    cardiovascular fitness for that age group.
+
+    Args:
+        date: Date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Fitness age estimate and contributing factors.
+    """
+    if not date:
+        date = _today()
+    import json
+    result = await _call("get_fitness_age", date)
+    return result
+
+
+# ===========================================================================
+# GROUP 9 — Body & Health Tracking
+# ===========================================================================
+
+@mcp.tool()
+async def get_resting_heart_rate(date: Optional[str] = None) -> str:
+    """
+    Returns the resting heart rate (RHR) for a specific date.
+
+    RHR is measured during sleep or rest and is a key cardiovascular
+    health indicator — lower values generally indicate better fitness.
+    Trending RHR upward can be an early sign of illness or overtraining.
+
+    Args:
+        date: Date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Resting heart rate in beats per minute for the day.
+    """
+    if not date:
+        date = _today()
+    import json
+    result = await _call("get_resting_heart_rate", date)
+    return result
+
+
+@mcp.tool()
+async def get_body_battery_events(date: Optional[str] = None) -> str:
+    """
+    Returns body battery charge and drain events throughout the day:
+    what activities or rest periods caused the biggest changes.
+
+    Useful for understanding which activities are most taxing and
+    how effectively sleep is recharging energy reserves.
+
+    Args:
+        date: Date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        List of body battery charge/drain events with timestamps and amounts.
+    """
+    if not date:
+        date = _today()
+    import json
+    result = await _call("get_body_battery_events", date)
+    return result
+
+
+@mcp.tool()
+async def get_weigh_ins(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns weight log entries over a date range from a Garmin Index scale
+    or manual entries in Garmin Connect.
+
+    Useful for tracking weight trends over time.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format. Defaults to 30 days ago.
+        end_date: End date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Weight entries with date, weight, and optional body composition data.
+    """
+    if not end_date:
+        end_date = _today()
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    import json
+    result = await _call("get_weigh_ins", start_date, end_date)
+    return result
+
+
+@mcp.tool()
+async def get_blood_pressure(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns blood pressure readings logged in Garmin Connect.
+
+    Note: Requires manual entry in the Garmin Connect app or a compatible
+    blood pressure monitor. Not automatically measured by Garmin wearables.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format. Defaults to 30 days ago.
+        end_date: Optional end date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Blood pressure readings (systolic/diastolic) with timestamps.
+    """
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    import json
+    result = await _call("get_blood_pressure", start_date, end_date)
+    return result
+
+
+# ===========================================================================
+# GROUP 10 — Weekly Trends
+# ===========================================================================
+
+@mcp.tool()
+async def get_weekly_step_trends(
+    end_date: Optional[str] = None,
+    weeks: Optional[int] = 12,
+) -> str:
+    """
+    Returns weekly step totals over the past N weeks.
+
+    Useful for identifying activity trends, seasonal patterns, or the
+    impact of life changes on daily movement.
+
+    Args:
+        end_date: Last date of the range in YYYY-MM-DD format. Defaults to today.
+        weeks: Number of weeks of history to return (default 12, max 52).
+
+    Returns:
+        Weekly step totals and averages.
+    """
+    if not end_date:
+        end_date = _today()
+    weeks = max(1, min(52, weeks or 12))
+    import json
+    result = await _call("get_weekly_steps", end_date, weeks)
+    return result
+
+
+@mcp.tool()
+async def get_weekly_stress_trends(
+    end_date: Optional[str] = None,
+    weeks: Optional[int] = 12,
+) -> str:
+    """
+    Returns weekly average stress scores over the past N weeks.
+
+    Useful for identifying high-stress periods and correlating stress
+    with training load, sleep quality, or life events.
+
+    Args:
+        end_date: Last date of the range in YYYY-MM-DD format. Defaults to today.
+        weeks: Number of weeks of history to return (default 12, max 52).
+
+    Returns:
+        Weekly average and peak stress scores.
+    """
+    if not end_date:
+        end_date = _today()
+    weeks = max(1, min(52, weeks or 12))
+    import json
+    result = await _call("get_weekly_stress", end_date, weeks)
+    return result
+
+
+@mcp.tool()
+async def get_weekly_intensity_trends(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """
+    Returns weekly moderate and vigorous intensity minutes over a date range.
+
+    Compare against the WHO-recommended 150 min/week moderate or
+    75 min/week vigorous activity guideline. Vigorous counts double.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format. Defaults to 12 weeks ago.
+        end_date: End date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Weekly moderate and vigorous intensity minute totals.
+    """
+    if not end_date:
+        end_date = _today()
+    if not start_date:
+        start_date = (datetime.now() - timedelta(weeks=12)).strftime("%Y-%m-%d")
+    import json
+    result = await _call("get_weekly_intensity_minutes", start_date, end_date)
+    return result
+
+
+# ===========================================================================
+# GROUP 11 — Goals & Achievements
+# ===========================================================================
+
+@mcp.tool()
+async def get_personal_records() -> str:
+    """
+    Returns the athlete's all-time personal records (PRs) across activity types:
+    fastest 1K, 5K, 10K, half marathon, marathon, longest run, etc.
+
+    PRs are automatically detected and updated by Garmin Connect after activities.
+
+    Returns:
+        All-time personal records with dates achieved.
+    """
+    import json
+    result = await _call("get_personal_records")
+    return result
+
+
+@mcp.tool()
+async def get_earned_badges() -> str:
+    """
+    Returns badges and challenges the user has completed in Garmin Connect:
+    step milestones, distance achievements, workout streaks, and more.
+
+    Returns:
+        List of earned badges with name, category, and date earned.
+    """
+    import json
+    result = await _call("get_earned_badges")
+    return result
+
+
+# ===========================================================================
+# GROUP 12 — Devices
+# ===========================================================================
+
+@mcp.tool()
+async def get_devices() -> str:
+    """
+    Returns all Garmin devices connected to the account: watch model,
+    firmware version, battery status, and last sync time.
+
+    Useful for understanding which hardware capabilities are available
+    (e.g. whether the device supports SpO2, power, solar charging).
+
+    Returns:
+        List of connected Garmin devices with model and firmware details.
+    """
+    import json
+    result = await _call("get_devices")
+    return result
+
+
+# ===========================================================================
+# GROUP 13 — Nutrition Details
+# ===========================================================================
+
+@mcp.tool()
+async def get_nutrition_meals(date: Optional[str] = None) -> str:
+    """
+    Returns a per-meal nutrition breakdown for the day: each meal (breakfast,
+    lunch, dinner, snacks) with calories and macros for that meal.
+
+    More granular than get_nutrition_log, which only shows daily totals.
+
+    Note: Requires food logging in the Garmin Connect app.
+
+    Args:
+        date: Date in YYYY-MM-DD format. Defaults to today.
+
+    Returns:
+        Per-meal calorie and macro breakdown.
+    """
+    if not date:
+        date = _today()
+    import json
+    result = await _call("get_nutrition_meals", date)
     return result

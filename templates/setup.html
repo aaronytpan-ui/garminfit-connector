@@ -136,8 +136,8 @@
     <div id="step-credentials" class="section active">
       <div id="cred-error" class="error-box" style="display:none;"></div>
       <div id="rate-limit-box" class="rate-limit-box" style="display:none;">
-        ⏳ <strong>Garmin is temporarily rate-limiting new connections.</strong><br>
-        Too many users are connecting at the same time. Please wait <strong id="rl-countdown">60</strong> seconds and try again.
+        ⏳ <strong>Garmin is temporarily rate-limiting connections from this server.</strong><br>
+        Please wait <strong id="rl-countdown">60</strong> <span id="rl-unit">seconds</span> and try again.
       </div>
       <div>
         <label for="email">Garmin Connect Email</label>
@@ -215,17 +215,26 @@
       const btn = document.getElementById('btn-connect');
       const box = document.getElementById('rate-limit-box');
       const countEl = document.getElementById('rl-countdown');
+      const unitEl = document.getElementById('rl-unit');
       box.style.display = 'block';
       hideError('cred-error');
       btn.disabled = true;
-      btn.innerHTML = `⏳ Retry in ${seconds}s…`;
-      countEl.textContent = seconds;
+
+      // For long waits (> 90 s) display minutes so the number doesn't feel absurd
+      const useMins = seconds > 90;
+      const display = (s) => useMins ? Math.ceil(s / 60) : s;
+      const unit    = useMins ? 'minutes' : 'seconds';
+      unitEl.textContent = unit;
+
       let remaining = seconds;
+      countEl.textContent = display(remaining);
+      btn.innerHTML = `⏳ Retry in ${display(remaining)} ${unit}…`;
+
       if (_rlTimer) clearInterval(_rlTimer);
       _rlTimer = setInterval(() => {
         remaining--;
-        countEl.textContent = remaining;
-        btn.innerHTML = `⏳ Retry in ${remaining}s…`;
+        countEl.textContent = display(remaining);
+        btn.innerHTML = `⏳ Retry in ${display(remaining)} ${unit}…`;
         if (remaining <= 0) {
           clearInterval(_rlTimer);
           _rlTimer = null;
@@ -343,12 +352,22 @@
             showError('mfa-error', data.error || 'Session expired. Please start over.');
             btn.disabled = false;
             btn.innerHTML = 'Verify &amp; Connect';
-            // Give the user a moment to read the message, then auto-reset to step 1
-            setTimeout(() => {
-              resetToStep1();
-              showError('cred-error', '⚠️ ' + (data.error ||
-                'Your login session expired. Please enter your credentials again to get a fresh code.'));
-            }, 4000);
+
+            // If Garmin also sent a rate-limit window, show a countdown on
+            // step 1 so the user knows exactly when they can try again.
+            if (data.rate_limited && data.retry_after) {
+              setTimeout(() => {
+                resetToStep1();
+                startRateLimitCountdown(data.retry_after);
+              }, 4000);
+            } else {
+              // Give the user a moment to read the message, then auto-reset
+              setTimeout(() => {
+                resetToStep1();
+                showError('cred-error', '⚠️ ' + (data.error ||
+                  'Your login session expired. Please enter your credentials again to get a fresh code.'));
+              }, 4000);
+            }
           } else {
             // Wrong/expired code — user can try a different code without restarting
             showError('mfa-error', data.error || 'Invalid MFA code. Please try again.');

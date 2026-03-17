@@ -46,6 +46,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from garth import sso as garth_sso
+from garth.exc import GarthHTTPError
 from garth.http import Client as GarthClient
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
@@ -79,7 +80,11 @@ _login_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="garmin-
 # ---------------------------------------------------------------------------
 
 _setup_lock = asyncio.Lock()
-_MIN_LOGIN_INTERVAL_SECS: float = 4.0
+# 10-second gap between sequential SSO logins from this server's shared IP.
+# Garmin's OAuth preauthorized endpoint has a per-IP rate limit that can
+# impose windows of 15–30 minutes; spacing requests out reduces how quickly
+# we burn through the budget.
+_MIN_LOGIN_INTERVAL_SECS: float = 10.0
 _last_login_time: float = 0.0
 
 
@@ -87,6 +92,26 @@ def _is_rate_limited(exc: Exception) -> bool:
     """Return True if the exception is a Garmin SSO 429 / rate-limit error."""
     msg = str(exc)
     return "429" in msg or "Too Many Requests" in msg or "rate" in msg.lower()
+
+
+def _extract_retry_after(exc: Exception, default: int = 1800) -> int:
+    """
+    Extract the Retry-After seconds from a GarthHTTPError 429 response.
+
+    Garmin sometimes returns a Retry-After header telling clients exactly
+    how long to wait.  Falls back to `default` (30 min) when absent.
+    """
+    try:
+        if isinstance(exc, GarthHTTPError) and exc.error is not None:
+            resp = getattr(exc.error, "response", None)
+            if resp is not None:
+                ra = resp.headers.get("Retry-After", "")
+                print(f"[rate-limit] Retry-After header: {ra!r}")
+                if ra.isdigit():
+                    return int(ra)
+    except Exception:
+        pass
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -249,14 +274,17 @@ async def api_setup_start(request: Request) -> JSONResponse:
             print(f"[setup] sso.login error: {type(e).__name__}: {e}")
             _last_login_time = time.monotonic()
             if _is_rate_limited(e):
+                retry_after = _extract_retry_after(e)
+                wait_mins = max(1, (retry_after + 59) // 60)
                 return JSONResponse(
                     {
                         "error": (
-                            "Garmin is temporarily rate-limiting new connections from this server. "
-                            "Please wait 60 seconds and try again."
+                            f"Garmin is rate-limiting new connections from this server's IP. "
+                            f"This window can last up to {wait_mins} minute(s). "
+                            f"Please wait and try again."
                         ),
                         "rate_limited": True,
-                        "retry_after": 60,
+                        "retry_after": retry_after,
                     },
                     status_code=429,
                 )
@@ -394,17 +422,24 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
             )
 
         # 429 here means all auto-retries were exhausted — Garmin's OAuth
-        # endpoint is still rate-limiting after several attempts.  A fresh
-        # login in ~60 seconds should succeed once the window resets.
+        # preauthorized endpoint is still rate-limiting after several attempts.
+        # The CAS ticket used in the exchange is now consumed/expired, so the
+        # entire login must be restarted once the rate-limit window clears.
+        # Garmin's window can be 15–30 minutes; honour Retry-After if present.
         if "429" in error_str:
+            retry_after = _extract_retry_after(e)
+            wait_mins = max(1, (retry_after + 59) // 60)
             return JSONResponse(
                 {
                     "error": (
-                        "Garmin's servers are temporarily rate-limiting this connection. "
-                        "Your MFA code was accepted — please wait 60 seconds, then start "
-                        "the setup process again and re-enter your credentials."
+                        f"Garmin's servers are rate-limiting this server's IP on the OAuth exchange. "
+                        f"This window typically lasts {wait_mins} minute(s). "
+                        f"Your MFA code was accepted but the token exchange could not complete. "
+                        f"Please wait {wait_mins} minute(s), then start the setup process again."
                     ),
                     "restart_required": True,
+                    "rate_limited": True,
+                    "retry_after": retry_after,
                 },
                 status_code=400,
             )

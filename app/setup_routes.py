@@ -169,15 +169,31 @@ def _resume_login_with_cookies(
 
     # ── Step 1: submit MFA code (identical to garth's handle_mfa) ──────────
     garth_sso.handle_mfa(client, signin_params, lambda: mfa_code)
-    # client.last_resp is now the verifyMFA Success page (200).
-    # The MFA session cookie is now live in client.sess.cookies.
+    # client.last_resp is now the verifyMFA response.
+    # Log it fully so we can see exactly what Garmin sent back.
+    _lr = client.last_resp
+    print(
+        f"[MFA-preauth] verifyMFA response: "
+        f"status={_lr.status_code}  url={_lr.url}"
+    )
+    # Log the page title so we know if it's Success / MFA-retry / error
+    _title_m = _re.search(r"<title>(.+?)</title>", _lr.text, _re.IGNORECASE)
+    print(f"[MFA-preauth] verifyMFA page title: {_title_m.group(1)!r}" if _title_m else "[MFA-preauth] verifyMFA page title: <not found>")
+    # Log first 600 chars so we can see the ticket URL if it's there
+    print(f"[MFA-preauth] verifyMFA body (first 600): {_lr.text[:600]!r}")
+    # Also log cookie names now present in client.sess (no values — security)
+    _cookie_names = [c.name for c in client.sess.cookies]
+    print(f"[MFA-preauth] SSO session cookies after verifyMFA: {_cookie_names}")
 
     # ── Step 2: extract CAS ticket from the Success page ───────────────────
     m = _re.search(r'embed\?ticket=([^"]+)"', client.last_resp.text)
     if not m:
+        # Also try single-quote variant in case Garmin changed their HTML
+        m = _re.search(r"embed\?ticket=([^']+)'", client.last_resp.text)
+    if not m:
         raise GarthException("Couldn't find ticket in response")
     ticket = m.group(1)
-    print(f"[MFA-preauth] ticket extracted: {ticket[:30]}...")
+    print(f"[MFA-preauth] ticket extracted: {ticket[:40]}...")
 
     # ── Step 3: exchange ticket — carry SSO cookies into OAuth1Session ──────
     # Ensure OAUTH_CONSUMER is populated (pre-warm should have done this).
@@ -208,9 +224,9 @@ def _resume_login_with_cookies(
     )
     print(
         f"[MFA-preauth] preauthorized → HTTP {resp.status_code}  "
-        f"cookies_sent={len(sess.cookies)}  "
-        f"body_preview={resp.text[:120]!r}"
+        f"cookies_sent={len(sess.cookies)}"
     )
+    print(f"[MFA-preauth] preauthorized body (first 400): {resp.text[:400]!r}")
     resp.raise_for_status()
 
     parsed = parse_qs(resp.text)

@@ -4,14 +4,13 @@ Authentication utilities:
   - In-memory MFA pending session store (5-minute TTL)
   - Access token generation for user MCP URLs
 
-MFA design (v4 — garth 0.7.9 native resume_login)
---------------------------------------------------
-garth 0.7.9 rewrites the SSO flow to use Garmin's mobile JSON API and carries
-load-balancer cookies into the OAuth1 preauthorized exchange natively.
-sso.login(return_on_mfa=True) returns immediately with a client_state dict
-({"login_params": ..., "client": ...}) when MFA is required.
-sso.resume_login(client_state, mfa_code) completes the login atomically with
-no gap between MFA submission and OAuth exchange.
+MFA design (v5 — MFABridge thread pattern)
+------------------------------------------
+The login thread runs sso.login() and blocks at bridge.prompt_mfa() when MFA
+is required.  api_setup_mfa unblocks it by calling bridge.submit_code(), then
+awaits bridge.get_result() for the tokens.  The thread completes the entire
+OAuth exchange in one uninterrupted live HTTP session, avoiding the session-
+token TTL issue that caused MFA_CODE_INVALID with resume_login().
 
 The PendingMFASession now stores just the garth client_state dict and the
 isolated garth.http.Client so resume_login can complete the flow.
@@ -77,20 +76,19 @@ def generate_access_token() -> str:
 @dataclass
 class PendingMFASession:
     """
-    Holds everything needed to complete a pending MFA login using garth's
-    native return_on_mfa / resume_login API.
+    Holds everything needed to complete a pending MFA login via MFABridge.
 
-    client_state: the dict returned by sso.login(return_on_mfa=True) when
-        MFA is required.  Contains {"login_params": ..., "client": ...}.
-        The embedded "client" key IS isolated_client — same object.
+    bridge: the MFABridge instance whose login thread is blocked at
+        prompt_mfa() waiting for the user's code.  Call bridge.submit_code()
+        to unblock it, then bridge.get_result() to wait for the tokens.
 
     isolated_client: the garth.http.Client instance used for this login.
-        Stored separately so we can call isolated_client.configure() and
-        isolated_client.dumps() after resume_login() returns the tokens.
+        Stored so we can call isolated_client.configure() and
+        isolated_client.dumps() after the bridge returns the tokens.
     """
     session_id: str
     garmin_email: str
-    client_state: dict        # returned by sso.login(return_on_mfa=True)
+    bridge: object            # MFABridge instance
     isolated_client: object   # garth.http.Client instance (for configure + dumps)
     expires_at: datetime = field(
         default_factory=lambda: datetime.utcnow() + timedelta(minutes=5)
@@ -105,7 +103,7 @@ MFA_TTL_MINUTES = 5
 
 def create_mfa_session(
     garmin_email: str,
-    client_state: dict,
+    bridge: object,
     isolated_client: object,
 ) -> str:
     """
@@ -117,7 +115,7 @@ def create_mfa_session(
     _pending[session_id] = PendingMFASession(
         session_id=session_id,
         garmin_email=garmin_email,
-        client_state=client_state,
+        bridge=bridge,
         isolated_client=isolated_client,
     )
     return session_id

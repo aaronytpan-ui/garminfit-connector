@@ -13,30 +13,37 @@ Endpoints:
 
 All API responses are JSON. HTML pages use Jinja2 templates.
 
-MFA design (v4 — native garth 0.7.9 resume_login)
----------------------------------------------------
-garth 0.7.9 rewrites the SSO flow to use Garmin's mobile JSON API
-(/mobile/api/login, /mobile/api/mfa/verifyCode) and carries Cloudflare
-load-balancer cookies into the OAuth1 preauthorized exchange via a
-/portal/sso/embed step.  This resolves both the legacy-account 401 (fixed
-by switching to Android consumer-key constants) and the MFA cookie problem
-that previously required our manual _resume_login_with_cookies workaround.
+MFA design (v5 — thread-bridge with garth 0.7.9 mobile JSON API)
+-----------------------------------------------------------------
+garth 0.7.9 uses Garmin's mobile JSON API (/mobile/api/login,
+/mobile/api/mfa/verifyCode).  Garmin's login session token (stored in
+login_params) has a very short TTL; using return_on_mfa=True + resume_login
+across two separate HTTP requests causes the session to expire between calls,
+resulting in MFA_CODE_INVALID even for correct codes.
 
-The flow is:
-  sso.login(email, password, return_on_mfa=True, client=isolated_client)
-    → ("needs_mfa", client_state)   # MFA path
-    → (OAuth1Token, OAuth2Token)    # no-MFA path
+Fix (MFABridge): keep the garth login thread alive and blocked at
+prompt_mfa() while waiting for the user's code.  When the code arrives via
+api_setup_mfa, we unblock the thread; garth calls /mobile/api/mfa/verifyCode
+and completes the OAuth exchange in one uninterrupted call with no
+serialisation gap.
 
-  sso.resume_login(client_state, mfa_code)
-    → (OAuth1Token, OAuth2Token)    # submits code, exchanges token atomically
+Flow:
+  1. api_setup_start: sso.login(..., prompt_mfa=bridge.prompt_mfa) in thread
+     → thread blocks at prompt_mfa(); bridge signals MFA needed
+  2. api_setup_start returns {"mfa_required": True, "session_id": ...}
+  3. api_setup_mfa: bridge.submit_code(mfa_code) unblocks the thread
+     → thread completes the OAuth flow and calls bridge.set_result(tokens)
+  4. api_setup_mfa awaits bridge.get_result() and returns the MCP URL
 
 Each login uses its own isolated garth.http.Client instance, so concurrent
-users never share global garth state.
+users never share global garth state.  The lock is released as soon as the
+thread blocks at prompt_mfa(), so MFA waits don't block other logins.
 """
 
 import asyncio
 import math
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -63,11 +70,62 @@ from app.database import SessionLocal, User
 # Thread pool for blocking garth SSO calls
 # ---------------------------------------------------------------------------
 
-# sso.login() and sso.resume_login() are synchronous (requests-based).
-# We run them in this pool so they don't block the asyncio event loop.
-# With return_on_mfa, no thread is ever held waiting for user input, so
-# a small pool is sufficient.
+# sso.login() is synchronous (requests-based).  We run it in this pool so it
+# doesn't block the asyncio event loop.  Each MFA login occupies one thread
+# for the duration of the user's MFA window (up to 5 min), so the pool needs
+# enough slots for concurrent logins.
 _login_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="garmin-login")
+
+
+# ---------------------------------------------------------------------------
+# MFA bridge — connects the blocking garth login thread with HTTP handlers
+# ---------------------------------------------------------------------------
+
+class MFABridge:
+    """
+    Bridges the garth login thread with our two-step HTTP MFA flow.
+
+    Lifecycle:
+      1. Login thread calls sso.login(..., prompt_mfa=bridge.prompt_mfa)
+      2. garth calls bridge.prompt_mfa() → thread blocks; _mfa_needed is set
+      3. api_setup_start sees _mfa_needed, stores bridge, returns mfa_required
+      4. api_setup_mfa calls bridge.submit_code(code) → thread unblocks
+      5. garth submits code to Garmin, completes OAuth, calls bridge.set_result
+      6. api_setup_mfa awaits bridge.get_result() and gets the tokens
+    """
+
+    def __init__(self):
+        self._mfa_needed = threading.Event()   # set when garth needs a code
+        self._code_ready = threading.Event()   # set when user submits a code
+        self._done = threading.Event()         # set when login thread finishes
+        self._code: str | None = None
+        self._result: tuple | Exception | None = None
+
+    def prompt_mfa(self) -> str:
+        """Called by garth in the login thread. Blocks until submit_code()."""
+        self._mfa_needed.set()
+        self._code_ready.wait(timeout=300)  # 5-minute window for the user
+        if self._code is None:
+            raise Exception("MFA timed out waiting for user input")
+        return self._code
+
+    def submit_code(self, code: str) -> None:
+        """Called by api_setup_mfa to provide the code and unblock the thread."""
+        self._code = code
+        self._code_ready.set()
+
+    def set_result(self, result: tuple | Exception) -> None:
+        """Called by the login thread wrapper when the login succeeds or fails."""
+        self._result = result
+        self._done.set()
+
+    def get_result(self, timeout: float = 60) -> tuple:
+        """Block until login completes, then return (oauth1, oauth2) or raise."""
+        if not self._done.wait(timeout=timeout):
+            raise TimeoutError("MFA login did not complete in time")
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
 
 # ---------------------------------------------------------------------------
 # Rate limiting — pace outgoing SSO requests to Garmin.
@@ -348,78 +406,101 @@ async def api_setup_start(request: Request) -> JSONResponse:
         else:
             print("[setup] No SSO_PROXY_URL set — using direct connection (may hit Cloudflare blocks)")
 
-        # sso.login(return_on_mfa=True) returns immediately in both cases:
-        #   - No MFA:  (OAuth1Token, OAuth2Token)
-        #   - MFA req: ("needs_mfa", {"signin_params": ..., "client": ...})
-        # No thread is left blocking — the lock can be released right away.
-        try:
-            result = await loop.run_in_executor(
-                _login_executor,
-                lambda: garth_sso.login(
+        # Start the login thread.  The thread calls sso.login() which will
+        # either complete (no MFA) or block at bridge.prompt_mfa() waiting
+        # for the user's code.  Either way we release the lock once credentials
+        # have been accepted by Garmin (i.e. once the thread blocks at
+        # prompt_mfa OR the login finishes).
+        bridge = MFABridge()
+
+        def _run_login():
+            try:
+                result = garth_sso.login(
                     email, password,
-                    return_on_mfa=True,
                     client=isolated_client,
-                ),
-            )
-        except Exception as e:
-            print(f"[setup] sso.login error: {type(e).__name__}: {e}")
-            _last_login_time = time.monotonic()
-
-            if _is_rate_limited(e):
-                retry_after = _extract_retry_after(e)
-                _set_garmin_block(retry_after, "429 at OAuth preauthorized")
-                wait_mins = max(1, (retry_after + 59) // 60)
-                return JSONResponse(
-                    {
-                        "error": (
-                            f"Garmin is rate-limiting new connections from this server's IP. "
-                            f"No further attempts will be made for ~{wait_mins} minute(s) "
-                            f"to avoid extending the ban. Please try again later."
-                        ),
-                        "rate_limited": True,
-                        "retry_after": retry_after,
-                    },
-                    status_code=429,
+                    prompt_mfa=bridge.prompt_mfa,
                 )
+                bridge.set_result(result)
+            except Exception as exc:
+                bridge.set_result(exc)
 
-            # 401 at the SSO signin URL means Garmin has escalated from
-            # rate-limiting the OAuth endpoint to blocking the IP at the
-            # SSO layer entirely — a more severe, longer ban.
-            if _is_ip_blocked(e):
-                _set_garmin_block(1800, "401 at SSO signin — IP-level block")
-                return JSONResponse(
-                    {
-                        "error": (
-                            "Garmin has temporarily blocked this server's IP from signing in. "
-                            "This is caused by too many recent failed attempts. "
-                            "No further attempts will be made for ~30 minutes. "
-                            "Please try again later."
-                        ),
-                        "rate_limited": True,
-                        "retry_after": 1800,
-                    },
-                    status_code=429,
-                )
+        loop.run_in_executor(_login_executor, _run_login)
 
-            return JSONResponse(
-                {"error": f"Authentication failed: {e}"},
-                status_code=400,
-            )
+        # Wait up to 30 s for credentials to be processed by Garmin.
+        # One of these will be set first:
+        #   bridge._mfa_needed  — Garmin accepted creds, MFA required
+        #   bridge._done        — login finished (success or failure, no MFA)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if bridge._mfa_needed.is_set() or bridge._done.is_set():
+                break
+            await asyncio.sleep(0.1)
 
         _last_login_time = time.monotonic()
-        # Lock released here.
+        # Lock released here — MFA wait happens outside the lock.
 
     # --- Interpret result ---------------------------------------------------
 
-    if result[0] == "needs_mfa":
-        # Store the garth client_state so resume_login() can complete it.
-        client_state = result[1]
+    if bridge._mfa_needed.is_set():
+        # Thread is blocked at prompt_mfa() — store bridge so api_setup_mfa
+        # can unblock it with the user's code.
         session_id = create_mfa_session(
             garmin_email=email,
-            client_state=client_state,
+            bridge=bridge,
             isolated_client=isolated_client,
         )
         return JSONResponse({"mfa_required": True, "session_id": session_id})
+
+    if not bridge._done.is_set():
+        # Neither event set within 30 s — Garmin is not responding.
+        return JSONResponse(
+            {"error": "Garmin login timed out. Please try again."},
+            status_code=408,
+        )
+
+    # Login completed synchronously (no MFA).  Check for errors.
+    try:
+        result = bridge.get_result(timeout=0)
+    except Exception as e:
+        print(f"[setup] sso.login error: {type(e).__name__}: {e}")
+
+        if _is_rate_limited(e):
+            retry_after = _extract_retry_after(e)
+            _set_garmin_block(retry_after, "429 at OAuth preauthorized")
+            wait_mins = max(1, (retry_after + 59) // 60)
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Garmin is rate-limiting new connections from this server's IP. "
+                        f"No further attempts will be made for ~{wait_mins} minute(s) "
+                        f"to avoid extending the ban. Please try again later."
+                    ),
+                    "rate_limited": True,
+                    "retry_after": retry_after,
+                },
+                status_code=429,
+            )
+
+        if _is_ip_blocked(e):
+            _set_garmin_block(1800, "401 at SSO signin — IP-level block")
+            return JSONResponse(
+                {
+                    "error": (
+                        "Garmin has temporarily blocked this server's IP from signing in. "
+                        "This is caused by too many recent failed attempts. "
+                        "No further attempts will be made for ~30 minutes. "
+                        "Please try again later."
+                    ),
+                    "rate_limited": True,
+                    "retry_after": 1800,
+                },
+                status_code=429,
+            )
+
+        return JSONResponse(
+            {"error": f"Authentication failed: {e}"},
+            status_code=400,
+        )
 
     # No MFA — result is (OAuth1Token, OAuth2Token)
     oauth1_token, oauth2_token = result
@@ -492,24 +573,22 @@ async def api_setup_mfa(request: Request) -> JSONResponse:
             status_code=400,
         )
 
-    client_state = session.client_state
+    bridge = session.bridge
     isolated_client = session.isolated_client
     loop = asyncio.get_event_loop()
 
-    # resume_login() submits the MFA code to Garmin's mobile API, gets the
-    # CAS ticket, and exchanges it for OAuth tokens in one call.  garth 0.7.9
-    # carries cookies into the OAuth1 exchange natively, so no workaround needed.
+    # Unblock the login thread — it will call /mobile/api/mfa/verifyCode and
+    # complete the full OAuth exchange atomically in one live HTTP session.
+    bridge.submit_code(mfa_code)
+    remove_mfa_session(session_id)
+
     try:
         oauth1_token, oauth2_token = await asyncio.wait_for(
-            loop.run_in_executor(
-                _login_executor,
-                lambda: garth_sso.resume_login(client_state, mfa_code),
-            ),
-            timeout=60,
+            loop.run_in_executor(None, lambda: bridge.get_result(timeout=60)),
+            timeout=65,
         )
     except asyncio.TimeoutError:
-        print(f"[MFA] resume_login timed out for session {session_id}")
-        remove_mfa_session(session_id)
+        print(f"[MFA] login thread timed out for session {session_id}")
         return JSONResponse(
             {
                 "error": "MFA authentication timed out. Please start the setup process again.",

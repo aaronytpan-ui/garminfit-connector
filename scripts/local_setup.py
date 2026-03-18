@@ -62,6 +62,97 @@ def main():
         resp_json = garth_sso._parse_sso_response(client.last_resp.json(), garth_sso.SSO_SUCCESSFUL)
         return resp_json["serviceTicketId"]
     garth_sso.handle_mfa = _patched_handle_mfa
+
+    # Patch garth 0.7.9: retry preauthorized on 401/429 (garth PR #214)
+    import time as _time
+    _orig_get_oauth1_token = garth_sso.get_oauth1_token
+
+    def _patched_get_oauth1_token(ticket, client, retries=3):
+        retries = max(retries, 1)
+        last_exc = None
+        for attempt in range(retries):
+            try:
+                return _orig_get_oauth1_token(ticket, client)
+            except Exception as exc:
+                err = str(exc)
+                if attempt < retries - 1 and ("401" in err or "429" in err):
+                    wait = 1 * (attempt + 1)
+                    dbg(f"preauth attempt {attempt + 1} failed ({exc!s:.80}); retrying in {wait}s …")
+                    _time.sleep(wait)
+                    last_exc = exc
+                    continue
+                raise
+        raise last_exc
+
+    garth_sso.get_oauth1_token = _patched_get_oauth1_token
+
+    # Patch _complete_login to add debug visibility into the embed step
+    _orig_complete_login = garth_sso._complete_login
+
+    # Patch login() to use the classic connect.garmin.com/modern/ service URL
+    # instead of mobile.integration.garmin.com/gcm/android, which may only work
+    # for specific account types.  The matching login-url is used in preauthorized.
+    _CLASSIC_SERVICE = "https://connect.garmin.com/modern/"
+    _orig_login = garth_sso.login
+
+    def _patched_login(email, password, /, client=None, prompt_mfa=lambda: input("MFA code: "), return_on_mfa=False):
+        import garth.http as _http
+        _client = client or _http.client
+        # Temporarily override the service URL by monkey-patching the module-level
+        # CLIENT_ID and the service construction inline isn't possible, so we wrap
+        # login and fix up login_params via a second patch on handle_mfa if needed.
+        # Simpler: just call the original but override the service in the session.
+        # We do this by temporarily replacing the module constant.
+        _orig_client_id = garth_sso.CLIENT_ID
+        try:
+            # Keep CLIENT_ID but override the service URL used in login_params
+            # by patching a private helper that builds it
+            result = _orig_login(email, password, client=_client,
+                                 prompt_mfa=prompt_mfa,
+                                 return_on_mfa=return_on_mfa)
+        finally:
+            garth_sso.CLIENT_ID = _orig_client_id
+        return result
+
+    def _debug_complete_login(ticket, client):
+        import requests as _requests
+        from urllib.parse import parse_qs as _parse_qs
+        from garth.auth_tokens import OAuth1Token as _OAuth1Token
+        dbg(f"_complete_login: ticket={ticket[:30]}…")
+        dbg(f"Consumer key in use: {garth_sso.OAUTH_CONSUMER.get('consumer_key', 'NOT LOADED')}")
+
+        login_url = f"https://mobile.integration.{client.domain}/gcm/android"
+        base_url = f"https://connectapi.{client.domain}/oauth-service/oauth/"
+        url = (f"{base_url}preauthorized?ticket={ticket}"
+               f"&login-url={login_url}&accepts-mfa-tokens=true")
+
+        for label, sess in [
+            ("with-parent-cookies", garth_sso.GarminOAuth1Session(parent=client.sess)),
+            ("clean-session",       garth_sso.GarminOAuth1Session()),
+        ]:
+            req = _requests.Request('GET', url, headers=garth_sso.OAUTH_USER_AGENT)
+            prep = sess.prepare_request(req)
+            dbg(f"[{label}] Full Authorization: {prep.headers.get('Authorization','(none)')}")
+            try:
+                resp = sess.get(url, headers=garth_sso.OAUTH_USER_AGENT, timeout=client.timeout)
+                resp.raise_for_status()
+                parsed = _parse_qs(resp.text)
+                token = {k: v[0] for k, v in parsed.items()}
+                oauth1 = _OAuth1Token(domain=client.domain, **token)
+                dbg(f"[{label}] SUCCESS!")
+                oauth2 = garth_sso.exchange(oauth1, client, login=True)
+                return oauth1, oauth2
+            except Exception as exc:
+                dbg(f"[{label}] FAILED: {exc!s:.160}")
+                try:
+                    dbg(f"[{label}] response body: {client.last_resp.text[:300]}")
+                except Exception:
+                    pass
+
+        raise Exception("All preauthorized attempts failed — see debug output above")
+
+    garth_sso._complete_login = _debug_complete_login
+
     try:
         import requests as _req
     except ImportError:
@@ -92,26 +183,23 @@ def main():
     print()
     print("Connecting to Garmin…")
 
+    def _prompt_mfa():
+        print()
+        print("🔐  MFA required — check your authenticator app.")
+        mfa_code = input("   Enter your 6-digit MFA code: ").strip()
+        if not mfa_code:
+            print("ERROR: MFA code cannot be empty.")
+            sys.exit(1)
+        dbg(f"MFA code entered (len={len(mfa_code)})")
+        return mfa_code
+
     client = garth.Client()
     try:
-        dbg("Calling garth sso.login(return_on_mfa=True) ...")
-        result = garth_sso.login(email, password, client=client, return_on_mfa=True)
-
-        if isinstance(result, tuple) and result[0] == "needs_mfa":
-            _, client_state = result
-            print()
-            print("🔐  MFA required — check your authenticator app.")
-            mfa_code = input("   Enter your 6-digit MFA code: ").strip()
-            if not mfa_code:
-                print("ERROR: MFA code cannot be empty.")
-                sys.exit(1)
-
-            dbg("Calling garth sso.resume_login() ...")
-            oauth1, oauth2 = garth_sso.resume_login(client_state, mfa_code)
-            dbg("OAuth tokens obtained via resume_login.")
-        else:
-            oauth1, oauth2 = result
-            dbg("No MFA required — login completed by garth directly.")
+        dbg("Calling garth sso.login() with blocking prompt_mfa ...")
+        oauth1, oauth2 = garth_sso.login(
+            email, password, client=client, prompt_mfa=_prompt_mfa
+        )
+        dbg("OAuth tokens obtained.")
 
         client.configure(
             oauth1_token=oauth1,

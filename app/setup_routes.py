@@ -104,6 +104,42 @@ def _patched_handle_mfa(client, login_params, prompt_mfa):
 
 
 garth_sso.handle_mfa = _patched_handle_mfa
+
+# ---------------------------------------------------------------------------
+# Monkey-patch garth 0.7.9: retry preauthorized on 401/429 (garth PR #214)
+# ---------------------------------------------------------------------------
+# get_oauth1_token() calls the OAuth preauthorized endpoint once and raises
+# immediately on any non-2xx.  Garmin's endpoint returns intermittent 401/429
+# responses even with a valid service ticket.  PR #214 (garth 0.7.10) adds
+# retry-with-backoff; we apply the same fix here until 0.7.10 is released.
+# ---------------------------------------------------------------------------
+
+_orig_get_oauth1_token = garth_sso.get_oauth1_token
+
+
+def _patched_get_oauth1_token(ticket: str, client, retries: int = 3):
+    retries = max(retries, 1)
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return _orig_get_oauth1_token(ticket, client)
+        except Exception as exc:
+            err = str(exc)
+            if attempt < retries - 1 and ("401" in err or "429" in err):
+                wait = 1 * (attempt + 1)  # 1 s, 2 s
+                print(
+                    f"[preauth] attempt {attempt + 1} failed ({exc!s:.80}); "
+                    f"retrying in {wait}s …"
+                )
+                time.sleep(wait)
+                last_exc = exc
+                continue
+            raise
+    raise last_exc  # type: ignore[misc]
+
+
+garth_sso.get_oauth1_token = _patched_get_oauth1_token
+
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from starlette.requests import Request

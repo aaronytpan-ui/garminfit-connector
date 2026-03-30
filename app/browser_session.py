@@ -22,6 +22,7 @@ Session lifecycle
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -96,16 +97,26 @@ async def create_session(prefill_email: str = "") -> Optional[str]:
     try:
         from playwright.async_api import async_playwright
 
+        # On Railway (Linux) we start Xvfb and set DISPLAY so we can run
+        # Chromium in headed mode.  Headed Chrome passes Cloudflare Turnstile
+        # reliably; headless mode fails fingerprint checks even with patches.
+        display = os.environ.get("DISPLAY", "")
+        headless = not bool(display)
+
         playwright = await async_playwright().start()
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+        ]
+        if headless:
+            # Only needed in true headless mode; headed mode has a real GPU pipe
+            launch_args.append("--disable-gpu")
+
         browser = await playwright.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
+            headless=headless,
+            args=launch_args,
         )
         context = await browser.new_context(
             viewport={"width": 1200, "height": 720},
@@ -119,10 +130,61 @@ async def create_session(prefill_email: str = "") -> Optional[str]:
         )
         page = await context.new_page()
 
-        # Mask automation signals
-        await page.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-        )
+        # Broad stealth patches — defeat the fingerprint checks that
+        # Cloudflare Turnstile uses to distinguish automated browsers.
+        await page.add_init_script("""
+            // 1. Hide webdriver flag
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+            // 2. Restore navigator.plugins to a realistic set
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => {
+                    const arr = [
+                        {name:'Chrome PDF Plugin', filename:'internal-pdf-viewer', description:'Portable Document Format'},
+                        {name:'Chrome PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai', description:''},
+                        {name:'Native Client', filename:'internal-nacl-plugin', description:''},
+                    ];
+                    arr.__proto__ = PluginArray.prototype;
+                    return arr;
+                }
+            });
+
+            // 3. Languages
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+
+            // 4. Restore window.chrome
+            if (!window.chrome) {
+                window.chrome = {
+                    app: {isInstalled: false, InstallState: {DISABLED:'disabled',INSTALLED:'installed',NOT_INSTALLED:'not_installed'}, RunningState: {CANNOT_RUN:'cannot_run',READY_TO_RUN:'ready_to_run',RUNNING:'running'}},
+                    runtime: {
+                        PlatformOs: {MAC:'mac',WIN:'win',ANDROID:'android',CROS:'cros',LINUX:'linux',OPENBSD:'openbsd'},
+                        PlatformArch: {ARM:'arm',X86_32:'x86-32',X86_64:'x86-64'},
+                        PlatformNaclArch: {ARM:'arm',X86_32:'x86-32',X86_64:'x86-64'},
+                        RequestUpdateCheckStatus: {THROTTLED:'throttled',NO_UPDATE:'no_update',UPDATE_AVAILABLE:'update_available'},
+                        OnInstalledReason: {INSTALL:'install',UPDATE:'update',CHROME_UPDATE:'chrome_update',SHARED_MODULE_UPDATE:'shared_module_update'},
+                        OnRestartRequiredReason: {APP_UPDATE:'app_update',OS_UPDATE:'os_update',PERIODIC:'periodic'},
+                    },
+                };
+            }
+
+            // 5. Permissions — return 'granted' for notifications so the
+            //    permissions API doesn't look stripped
+            const _origQuery = window.Notification && Notification.permission;
+            const _origPermQuery = navigator.permissions && navigator.permissions.query.bind(navigator.permissions);
+            if (_origPermQuery) {
+                navigator.permissions.query = (params) => {
+                    if (params.name === 'notifications') {
+                        return Promise.resolve({state: Notification.permission || 'default', onchange: null});
+                    }
+                    return _origPermQuery(params);
+                };
+            }
+
+            // 6. Hide automation-related properties
+            delete navigator.__proto__.webdriver;
+        """)
+
+        log.info("Browser session %s: headless=%s display=%r", session_id, headless, display)
 
         session = BrowserSession(
             session_id=session_id,

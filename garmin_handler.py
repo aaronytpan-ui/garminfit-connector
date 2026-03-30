@@ -1,10 +1,21 @@
 """
 Garmin Connect data handler for retrieving and formatting user fitness data.
+
+Note: garth/garminconnect are no longer used for the multi-user server path.
+Authentication is now handled by GarminApiClient (cookie-based) via
+MultiUserGarminHandler in app/garmin_adapter.py, which bypasses this class's
+__init__ entirely.  The imports below are kept optional so that the file loads
+cleanly even without garth/garminconnect installed.
 """
 
-import garth
-from garth.exc import GarthHTTPError
-from garminconnect import Garmin
+try:
+    import garth
+    from garth.exc import GarthHTTPError
+    from garminconnect import Garmin
+except ImportError:
+    garth = None  # type: ignore[assignment]
+    GarthHTTPError = Exception  # type: ignore[assignment,misc]
+    Garmin = None  # type: ignore[assignment]
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable

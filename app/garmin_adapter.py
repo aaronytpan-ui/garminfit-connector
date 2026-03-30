@@ -1,24 +1,23 @@
 """
 Multi-user Garmin adapter.
 
-The core challenge: garth normally uses a module-level singleton (garth.client)
-that writes tokens to disk. In a multi-user server every request must be isolated.
+Auth model change (March 2026):
+  Garmin's SSO/OAuth is blocked by Cloudflare, making the garth library
+  non-functional.  We now use browser-based session cookies obtained via
+  scripts/playwright_setup.py (run locally by each user).
 
-Solution: garminconnect.Garmin() creates its own garth.Client instance (garmin.garth).
-When login() receives a base64 string longer than 512 chars, it calls garth.loads()
-directly — pure in-memory, no disk I/O, no global state.
+  The cookies + display_name are stored as an encrypted JSON string in the
+  existing garth_token_encrypted column (format changed, column name kept).
 
 Per-request flow:
-  1. Decrypt the user's stored garth token from DB
-  2. Create a fresh Garmin() instance
-  3. Call login(tokenstore=token_b64) → in-memory injection
-  4. Run data calls on this isolated client
-  5. If tokens were refreshed, save the new dumps() back to DB
-  6. Discard the Garmin instance — nothing persists between requests
+  1. Decrypt the user's stored JSON token from DB
+  2. Create a GarminApiClient from the cookies
+  3. Run data calls on the isolated client
+  4. Persist any updated cookies back to DB (fire-and-forget)
+  5. Discard the client — nothing persists between requests
 """
 
 import asyncio
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -26,6 +25,7 @@ from sqlalchemy import select
 
 from app.auth_manager import decrypt_token, encrypt_token
 from app.database import SessionLocal, User
+from app.garmin_api_client import GarminApiClient
 from garmin_handler import GarminDataHandler
 
 
@@ -35,24 +35,20 @@ from garmin_handler import GarminDataHandler
 
 class MultiUserGarminHandler(GarminDataHandler):
     """
-    Wraps a pre-authenticated garminconnect.Garmin client.
+    Wraps a pre-authenticated GarminApiClient.
 
-    Inherits ALL data methods and format_data_for_context() from
-    GarminDataHandler without modification. Only __init__ is overridden
-    to skip file-based authentication and accept a live Garmin client.
+    Inherits ALL data methods from GarminDataHandler without modification.
+    Only __init__ is overridden to skip file-based auth and inject the client.
     """
 
-    def __init__(self, authenticated_client):
-        """
-        Bypass parent __init__ entirely. The parent would try to set up
-        file-based garth auth — we skip that and inject the client directly.
-        """
-        self.client = authenticated_client
+    def __init__(self, api_client: GarminApiClient) -> None:
+        # Bypass GarminDataHandler.__init__ (which tries to set up garth/disk auth)
+        self.client = api_client
         self._authenticated = True
-        self.email = getattr(authenticated_client, "username", "") or ""
+        self.email = ""
         self.token_store = None
-        # garmin_handler may reference self.garmin — set it as an alias
-        self.garmin = authenticated_client
+        # Legacy alias: some code accesses handler.garmin
+        self.garmin = api_client
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +67,8 @@ async def get_user_by_token(access_token: str) -> Optional[User]:
         return result.scalar_one_or_none()
 
 
-async def update_last_used(access_token: str):
-    """Update last_used_at timestamp for the user (fire-and-forget)."""
+async def update_last_used(access_token: str) -> None:
+    """Update last_used_at timestamp (fire-and-forget)."""
     try:
         async with SessionLocal() as db:
             result = await db.execute(
@@ -83,17 +79,20 @@ async def update_last_used(access_token: str):
                 user.last_used_at = datetime.utcnow()
                 await db.commit()
     except Exception:
-        pass  # Non-critical — don't fail tool calls over a timestamp update
+        pass
 
 
 async def save_refreshed_tokens(access_token: str, garmin_client) -> None:
     """
-    After a Garmin API call, the garth client may have silently refreshed
-    its OAuth2 token. Persist the updated token back to the database.
+    Persist the current client state back to the database.
+
+    With cookie-based auth, the server may issue updated session cookies
+    during an API call.  Saving the current cookie jar after each call
+    ensures we always store the freshest session.
     """
     try:
-        new_token_b64 = garmin_client.garth.dumps()
-        encrypted = encrypt_token(new_token_b64)
+        new_token_json = garmin_client.garth.dumps()
+        encrypted = encrypt_token(new_token_json)
         async with SessionLocal() as db:
             result = await db.execute(
                 select(User).where(User.access_token == access_token)
@@ -104,23 +103,20 @@ async def save_refreshed_tokens(access_token: str, garmin_client) -> None:
                 user.token_refreshed_at = datetime.utcnow()
                 await db.commit()
     except Exception:
-        pass  # Non-critical — tokens are still valid for this session
+        pass  # Non-critical — current session is still valid
 
 
 # ---------------------------------------------------------------------------
 # Primary adapter function used by MCP tools
 # ---------------------------------------------------------------------------
 
-async def get_garmin_handler(access_token: str) -> "MultiUserGarminHandler":
+async def get_garmin_handler(access_token: str) -> MultiUserGarminHandler:
     """
-    Load the user's garth tokens from DB and return an authenticated
+    Load the user's session cookies from DB and return an authenticated
     MultiUserGarminHandler ready for data queries.
 
     Raises ValueError if the token is invalid or revoked.
-    Raises RuntimeError if Garmin authentication fails.
     """
-    from garminconnect import Garmin
-
     user = await get_user_by_token(access_token)
     if not user:
         raise ValueError(
@@ -128,42 +124,24 @@ async def get_garmin_handler(access_token: str) -> "MultiUserGarminHandler":
             "Please visit /setup to reconnect your Garmin account."
         )
 
-    # Decrypt stored garth token
-    token_b64 = decrypt_token(user.garth_token_encrypted)
+    token_json = decrypt_token(user.garth_token_encrypted)
+    api_client = GarminApiClient.from_token(token_json)
 
-    # Create an isolated Garmin client — its own garth.Client, no shared state
-    garmin_client = Garmin()
-
-    # login(tokenstore=base64_str) with len > 512 calls garth.loads() — in-memory only
-    loop = asyncio.get_event_loop()
-    try:
-        await loop.run_in_executor(None, garmin_client.login, token_b64)
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to authenticate with Garmin. Your session may have expired. "
-            f"Please visit /setup to reconnect. Error: {e}"
-        )
-
-    # Update last_used timestamp (fire-and-forget)
     asyncio.create_task(update_last_used(access_token))
 
-    return MultiUserGarminHandler(garmin_client)
+    return MultiUserGarminHandler(api_client)
 
 
 async def run_garmin(access_token: str, fn, *args, **kwargs):
     """
-    Helper: get an authenticated handler, run a blocking Garmin call in a
-    thread executor, optionally save refreshed tokens, and return the result.
-
-    Usage in tools:
-        result = await run_garmin(token, handler.get_sleep_data, date)
+    Helper: get an authenticated handler, run a blocking call in a thread
+    executor, save refreshed cookies, and return the result.
     """
     handler = await get_garmin_handler(access_token)
     loop = asyncio.get_event_loop()
 
     result = await loop.run_in_executor(None, lambda: fn(handler, *args, **kwargs))
 
-    # Persist any token refresh that occurred during the API call
     asyncio.create_task(save_refreshed_tokens(access_token, handler.garmin))
 
     return result

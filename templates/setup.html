@@ -280,16 +280,10 @@
     <h1>Garmin Chat Connector</h1>
     <p class="subtitle">Connect your Garmin account to Claude, ChatGPT, and other AI chat tools.</p>
 
-    <div class="info-banner" style="background:#1E1010;border-color:#3A1818;border-left-color:#CC4444;color:#E08080;">
-      <strong style="color:#E05050;">Setup temporarily unavailable.</strong>
-      We are actively working with Garmin to establish a compatible login solution.
-      New connections cannot be created at this time — please check back soon.
-    </div>
+    <label for="email-input">Your Garmin email</label>
+    <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email" />
 
-    <label for="email-input" style="opacity:0.4;">Your Garmin email</label>
-    <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email" disabled style="opacity:0.4;cursor:not-allowed;" />
-
-    <button class="btn" id="connect-btn" disabled style="opacity:0.4;cursor:not-allowed;">Setup Temporarily Unavailable</button>
+    <button class="btn" id="connect-btn">Connect Garmin Account</button>
 
     <div id="error-banner"></div>
 

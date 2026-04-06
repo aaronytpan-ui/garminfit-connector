@@ -75,7 +75,23 @@ class UCLoginSession:
         # UC mode is unreliable with Chrome's --headless flag.
         use_xvfb = not bool(os.environ.get("DISPLAY", ""))
 
-        with SB(uc=True, headless=False, xvfb=use_xvfb) as sb:
+        # Explicitly locate the Chrome binary so SeleniumBase doesn't fall
+        # back to a slow/failing auto-search inside the container.
+        _CHROME_CANDIDATES = [
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+        ]
+        binary = next((p for p in _CHROME_CANDIDATES if os.path.exists(p)), None)
+        sb_kwargs = dict(uc=True, headless=False, xvfb=use_xvfb)
+        if binary:
+            sb_kwargs["binary_location"] = binary
+            log.info("Using Chrome binary: %s", binary)
+        else:
+            log.warning("No Chrome binary found at known paths; SeleniumBase will search PATH")
+
+        with SB(**sb_kwargs) as sb:
             # uc_open_with_reconnect briefly disconnects CDP during navigation
             # so Cloudflare sees the request as human-initiated.
             sb.uc_open_with_reconnect(GARMIN_CONNECT_URL, reconnect_time=6)

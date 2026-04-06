@@ -32,6 +32,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download a matching ChromeDriver at build time so SeleniumBase UC doesn't
+# try (and fail) to fetch it at runtime inside Railway's container.
+RUN seleniumbase install chromedriver
+
 COPY . .
 
 # Railway injects $PORT at runtime; shell form expands it correctly.

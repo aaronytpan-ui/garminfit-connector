@@ -1,32 +1,14 @@
 """
 Authentication utilities:
   - Fernet encryption/decryption for garth tokens stored in DB
-  - In-memory MFA pending session store (5-minute TTL)
   - Access token generation for user MCP URLs
-
-MFA design (v5 — MFABridge thread pattern)
-------------------------------------------
-The login thread runs sso.login() and blocks at bridge.prompt_mfa() when MFA
-is required.  api_setup_mfa unblocks it by calling bridge.submit_code(), then
-awaits bridge.get_result() for the tokens.  The thread completes the entire
-OAuth exchange in one uninterrupted live HTTP session, avoiding the session-
-token TTL issue that caused MFA_CODE_INVALID with resume_login().
-
-The PendingMFASession now stores just the garth client_state dict and the
-isolated garth.http.Client so resume_login can complete the flow.
-
-NOTE: Pending MFA sessions are stored in-memory on a single Railway dyno.
-If the server restarts during a user's 5-minute MFA window, their session is
-lost and they must restart the setup process. This is acceptable for V1.
-For multi-dyno deployments, replace _pending with a Redis-backed store.
 """
 
 import os
 import secrets
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 
 from cryptography.fernet import Fernet
+
 
 # ---------------------------------------------------------------------------
 # Token encryption
@@ -59,106 +41,7 @@ def decrypt_token(encrypted: str) -> str:
 def generate_access_token() -> str:
     """
     Generate a cryptographically random URL-safe token (~22 chars).
-    This is the token embedded in the user's MCP URL path:
+    This is the token embedded in the user's MCP URL:
       https://garminfit-connector.railway.app/garmin/?token={access_token}
-
-    token_urlsafe(16) produces a base64url string (a-z A-Z 0-9 - _)
-    that is shorter and less likely to be flagged by WAF rules than a
-    64-character hex string (which resembles a SHA-256 hash).
     """
     return secrets.token_urlsafe(16)  # 16 bytes → ~22 URL-safe chars
-
-
-# ---------------------------------------------------------------------------
-# In-memory MFA pending session store
-# ---------------------------------------------------------------------------
-
-@dataclass
-class PendingMFASession:
-    """
-    Holds everything needed to complete a pending MFA login via MFABridge.
-
-    bridge: the MFABridge instance whose login thread is blocked at
-        prompt_mfa() waiting for the user's code.  Call bridge.submit_code()
-        to unblock it, then bridge.get_result() to wait for the tokens.
-
-    isolated_client: the garth.http.Client instance used for this login.
-        Stored so we can call isolated_client.configure() and
-        isolated_client.dumps() after the bridge returns the tokens.
-    """
-    session_id: str
-    garmin_email: str
-    bridge: object            # MFABridge instance
-    isolated_client: object   # garth.http.Client instance (for configure + dumps)
-    expires_at: datetime = field(
-        default_factory=lambda: datetime.utcnow() + timedelta(minutes=5)
-    )
-
-
-# Module-level dict: session_id → PendingMFASession
-_pending: dict[str, PendingMFASession] = {}
-
-MFA_TTL_MINUTES = 5
-
-
-def create_mfa_session(
-    garmin_email: str,
-    bridge: object,
-    isolated_client: object,
-) -> str:
-    """
-    Store a pending MFA session and return its session_id.
-    The caller should return session_id to the setup page JS.
-    """
-    _cleanup_expired()
-    session_id = secrets.token_urlsafe(24)
-    _pending[session_id] = PendingMFASession(
-        session_id=session_id,
-        garmin_email=garmin_email,
-        bridge=bridge,
-        isolated_client=isolated_client,
-    )
-    return session_id
-
-
-def get_mfa_session(session_id: str) -> PendingMFASession | None:
-    """
-    Retrieve (but do not remove) a pending MFA session.
-    Returns None if the session doesn't exist or has expired.
-    Use remove_mfa_session() when the session is no longer needed.
-    """
-    _cleanup_expired()
-    session = _pending.get(session_id)
-    if session is None:
-        return None
-    if datetime.utcnow() > session.expires_at:
-        del _pending[session_id]
-        return None
-    return session
-
-
-def remove_mfa_session(session_id: str) -> None:
-    """Remove a pending MFA session (called after success or unrecoverable error)."""
-    _pending.pop(session_id, None)
-
-
-def pop_mfa_session(session_id: str) -> PendingMFASession | None:
-    """
-    Retrieve and remove a pending MFA session.
-    Returns None if the session doesn't exist or has expired.
-    """
-    _cleanup_expired()
-    session = _pending.pop(session_id, None)
-    if session is None:
-        return None
-    if datetime.utcnow() > session.expires_at:
-        return None  # expired but wasn't cleaned up yet
-    return session
-
-
-def _cleanup_expired():
-    """Remove expired sessions from the in-memory store."""
-    now = datetime.utcnow()
-    expired = [sid for sid, s in _pending.items() if now > s.expires_at]
-    for sid in expired:
-        del _pending[sid]

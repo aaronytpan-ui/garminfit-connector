@@ -16,21 +16,83 @@
       justify-content: center;
       padding: 1.5rem;
     }
-
-    /* ── Landing card (email entry) ── */
     .card {
       background: #16162A;
       border: 1px solid rgba(255,255,255,0.06);
       border-radius: 12px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.5);
       padding: 2.5rem;
-      max-width: 520px;
+      max-width: 480px;
       width: 100%;
     }
     .logo { margin-bottom: 0.75rem; }
     .logo img { width: 52px; height: 52px; border-radius: 10px; }
     h1 { font-size: 1.5rem; font-weight: 700; color: #E8EAF2; margin-bottom: 0.25rem; }
     .subtitle { color: #8A90AA; font-size: 0.95rem; margin-bottom: 1.75rem; }
+
+    label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #C0C4D8;
+      margin-bottom: 0.4rem;
+    }
+    input[type="email"],
+    input[type="password"],
+    input[type="text"] {
+      width: 100%;
+      background: #0D0D1A;
+      border: 1px solid #2A2A46;
+      border-radius: 8px;
+      color: #E8EAF2;
+      font-size: 0.95rem;
+      padding: 0.6rem 0.85rem;
+      outline: none;
+      margin-bottom: 1rem;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #5CC98A; }
+    input::placeholder { color: #5A5F78; }
+    input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn {
+      width: 100%;
+      background: #1D7A4A;
+      color: #E8F8EE;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 0.7rem 1rem;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    .btn:hover:not(:disabled) { background: #22934F; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(232,248,238,0.3);
+      border-top-color: #E8F8EE;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status-msg {
+      font-size: 0.82rem;
+      color: #8A90AA;
+      text-align: center;
+      margin-top: 0.75rem;
+      min-height: 1.2em;
+    }
+
     .info-banner {
       background: #111E1A;
       border: 1px solid #1E3830;
@@ -43,185 +105,21 @@
       line-height: 1.55;
     }
     .info-banner strong { color: #5CC98A; }
-    label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #C0C4D8;
-      margin-bottom: 0.4rem;
-    }
-    input[type="email"] {
-      width: 100%;
-      background: #0D0D1A;
-      border: 1px solid #2A2A46;
-      border-radius: 8px;
-      color: #E8EAF2;
-      font-size: 0.95rem;
-      padding: 0.6rem 0.85rem;
-      outline: none;
-      margin-bottom: 1rem;
-      transition: border-color 0.15s;
-    }
-    input[type="email"]:focus { border-color: #5CC98A; }
-    input[type="email"]::placeholder { color: #5A5F78; }
-    input[type="email"]:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn {
-      width: 100%;
-      background: #1D7A4A;
-      color: #E8F8EE;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      padding: 0.7rem 1rem;
-      cursor: pointer;
-      transition: background 0.15s, opacity 0.15s;
-    }
-    .btn:hover:not(:disabled) { background: #22934F; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .footer-links {
-      margin-top: 1.5rem;
-      text-align: center;
-      font-size: 0.8rem;
-      color: #5A5F78;
-    }
-    .footer-links a { color: #7080B8; text-decoration: none; }
-    .footer-links a:hover { color: #A0B0D8; text-decoration: underline; }
 
-    /* ── Browser viewer ── */
-    #browser-view {
+    .error-banner {
       display: none;
-      flex-direction: column;
-      width: 100%;
-      max-width: 1220px;
+      background: #1E1010;
+      border: 1px solid #3A1818;
+      border-left: 3px solid #CC4444;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      font-size: 0.875rem;
+      color: #E08080;
+      margin-bottom: 1rem;
+      line-height: 1.5;
     }
-    /* Windows Chrome tab bar */
-    .browser-tabbar {
-      background: #202035;
-      border: 1px solid rgba(255,255,255,0.08);
-      border-bottom: none;
-      border-radius: 10px 10px 0 0;
-      display: flex;
-      align-items: flex-end;
-      padding: 6px 0 0 8px;
-      gap: 0;
-    }
-    .browser-tab {
-      background: #16162A;
-      border: 1px solid rgba(255,255,255,0.08);
-      border-bottom: none;
-      border-radius: 8px 8px 0 0;
-      padding: 5px 36px 5px 12px;
-      font-size: 0.75rem;
-      color: #C0C4D8;
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      min-width: 160px;
-      position: relative;
-    }
-    .browser-tab svg { flex-shrink: 0; }
-    .tab-close {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 16px; height: 16px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      color: #5A5F78;
-      font-size: 10px;
-      line-height: 1;
-    }
-    .win-controls {
-      margin-left: auto;
-      display: flex;
-      align-items: center;
-      padding-bottom: 4px;
-      padding-right: 4px;
-    }
-    .win-btn {
-      width: 46px; height: 30px;
-      display: flex; align-items: center; justify-content: center;
-      color: #8A90AA;
-      font-size: 10px;
-      cursor: default;
-      border-radius: 4px;
-      transition: background 0.1s;
-    }
-    .win-btn:hover { background: rgba(255,255,255,0.08); }
-    .win-btn.close:hover { background: #C42B1C; color: #fff; }
-    /* Address bar row */
-    .browser-chrome {
-      background: #16162A;
-      border-left: 1px solid rgba(255,255,255,0.08);
-      border-right: 1px solid rgba(255,255,255,0.08);
-      padding: 5px 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .chrome-btn {
-      width: 28px; height: 28px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      color: #5A6078;
-      flex-shrink: 0;
-    }
-    #url-bar {
-      flex: 1;
-      background: #111120;
-      border: 1px solid #2A2A46;
-      border-radius: 16px;
-      color: #8A90AA;
-      font-size: 0.78rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      padding: 0.3rem 0.85rem;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      pointer-events: none;
-      user-select: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .url-lock { color: #5A6078; flex-shrink: 0; }
-    .url-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .canvas-wrap {
-      position: relative;
-      background: #000;
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 0 0 10px 10px;
-      overflow: hidden;
-      cursor: default;
-    }
-    #garmin-canvas {
-      display: block;
-      width: 100%;
-      /* height set dynamically via JS to preserve 1200:720 aspect ratio */
-    }
-    #browser-status {
-      margin-top: 0.65rem;
-      font-size: 0.82rem;
-      color: #8A90AA;
-      text-align: center;
-      min-height: 1.2em;
-    }
-    .spinner {
-      display: inline-block;
-      width: 14px; height: 14px;
-      border: 2px solid #2A2A46;
-      border-top-color: #5CC98A;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      vertical-align: middle;
-      margin-right: 0.4rem;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Success overlay ── */
-    #success-banner {
+    .success-banner {
       display: none;
       background: #111E1A;
       border: 1px solid #1E3830;
@@ -230,10 +128,10 @@
       padding: 1rem 1.1rem;
       font-size: 0.9rem;
       color: #7AD4A0;
-      margin-top: 0.75rem;
       line-height: 1.6;
     }
-    #success-banner strong { color: #5CC98A; }
+    .success-banner strong { color: #5CC98A; }
+
     .mcp-url-box {
       background: #0D0D1A;
       border: 1px solid #2A2A46;
@@ -257,350 +155,242 @@
     }
     .copy-btn:hover { background: #234470; }
 
-    /* ── Error banner ── */
-    #error-banner {
-      display: none;
-      background: #1E1010;
-      border: 1px solid #3A1818;
-      border-left: 3px solid #CC4444;
-      border-radius: 8px;
-      padding: 0.85rem 1rem;
-      font-size: 0.875rem;
-      color: #E08080;
-      margin-top: 0.75rem;
-      line-height: 1.5;
+    .footer-links {
+      margin-top: 1.5rem;
+      text-align: center;
+      font-size: 0.8rem;
+      color: #5A5F78;
     }
+    .footer-links a { color: #7080B8; text-decoration: none; }
+    .footer-links a:hover { color: #A0B0D8; text-decoration: underline; }
+
+    /* Step visibility */
+    .step { display: none; }
+    .step.active { display: block; }
   </style>
 </head>
 <body>
 
-  <!-- ── Landing card ── -->
-  <div class="card" id="landing-card">
-    <div class="logo"><img src="/static/icon.ico" alt="Garmin Chat Connector" /></div>
-    <h1>Garmin Chat Connector</h1>
-    <p class="subtitle">Connect your Garmin account to Claude, ChatGPT, and other AI chat tools.</p>
+<div class="card">
+  <div class="logo"><img src="/static/icon.ico" alt="Garmin Chat Connector" /></div>
+  <h1>Garmin Chat Connector</h1>
+  <p class="subtitle">Connect your Garmin account to Claude, ChatGPT, and other AI chat tools.</p>
 
+  <!-- ── Step 1: Credentials ── -->
+  <div class="step active" id="step-credentials">
     <div class="info-banner">
-      <strong>Recommended: use the local setup script.</strong>
-      Garmin's login page uses Cloudflare Turnstile, which requires a real browser
-      on your own machine to pass. Run the script below once — it opens a Chrome
-      window, you log in normally, and your session is registered automatically.
-      <br /><br />
-      <strong>1.</strong> <a href="https://raw.githubusercontent.com/rod-trent/garminfit-connector/main/scripts/playwright_setup.py" download="playwright_setup.py" target="_blank" rel="noopener noreferrer" style="color:#5CC98A;">Download playwright_setup.py</a><br />
-      <strong>2.</strong> Install dependencies (one-time):<br />
-      <code style="display:block;background:#0D0D1A;border-radius:4px;padding:0.4rem 0.6rem;margin:0.4rem 0;font-size:0.8rem;color:#A8B4E0;">pip install playwright httpx &amp;&amp; playwright install chrome</code>
-      <strong>3.</strong> Run the script:<br />
-      <code style="display:block;background:#0D0D1A;border-radius:4px;padding:0.4rem 0.6rem;margin:0.4rem 0;font-size:0.8rem;color:#A8B4E0;">python playwright_setup.py</code>
+      <strong>Sign in with your Garmin account.</strong>
+      Your credentials are used only to authenticate with Garmin — they are
+      never stored. A session token is saved so Claude can query your data.
     </div>
 
-    <details style="margin-bottom:1rem;">
-      <summary style="cursor:pointer;font-size:0.875rem;color:#8A90AA;user-select:none;">
-        Alternative: connect via this page (requires a residential proxy on the server)
-      </summary>
-      <div style="margin-top:0.75rem;">
-        <label for="email-input">Your Garmin email</label>
-        <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email" />
-        <button class="btn" id="connect-btn">Connect Garmin Account</button>
-      </div>
-    </details>
+    <div class="error-banner" id="cred-error"></div>
 
-    <div id="error-banner"></div>
+    <label for="email-input">Garmin email</label>
+    <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email" />
 
-    <div class="footer-links">
-      Already connected? <a href="/disconnect">Disconnect your account</a>
+    <label for="password-input">Password</label>
+    <input type="password" id="password-input" placeholder="••••••••" autocomplete="current-password" />
+
+    <button class="btn" id="login-btn" onclick="submitLogin()">
+      Sign in to Garmin
+    </button>
+    <div class="status-msg" id="cred-status"></div>
+  </div>
+
+  <!-- ── Step 2: MFA ── -->
+  <div class="step" id="step-mfa">
+    <div class="info-banner">
+      <strong>Two-factor authentication required.</strong>
+      Enter the verification code from your authenticator app or SMS.
+    </div>
+
+    <div class="error-banner" id="mfa-error"></div>
+
+    <label for="mfa-input">Verification code</label>
+    <input type="text" id="mfa-input" placeholder="123456" autocomplete="one-time-code"
+           inputmode="numeric" maxlength="8" />
+
+    <button class="btn" id="mfa-btn" onclick="submitMfa()">
+      Verify
+    </button>
+    <div class="status-msg" id="mfa-status"></div>
+  </div>
+
+  <!-- ── Step 3: Success ── -->
+  <div class="step" id="step-success">
+    <div class="success-banner" id="success-banner" style="display:block;">
+      <strong>Your Garmin account is connected.</strong>
+      Copy the MCP URL below and paste it into your AI client (Claude Desktop, Claude.ai, etc.).
+      <div class="mcp-url-box" id="mcp-url-text"></div>
+      <button class="copy-btn" id="copy-btn" onclick="copyUrl()">Copy URL</button>
     </div>
   </div>
 
-  <!-- ── Browser viewer (shown after connect) ── -->
-  <div id="browser-view">
-    <!-- Windows Chrome tab bar -->
-    <div class="browser-tabbar">
-      <div class="browser-tab">
-        <!-- favicon placeholder -->
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#5A6078" stroke-width="1.5"/><path d="M8 4v4l3 2" stroke="#5A6078" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px" id="tab-title">Garmin Sign In</span>
-        <span class="tab-close">✕</span>
-      </div>
-      <div class="win-controls">
-        <!-- Minimize -->
-        <div class="win-btn">
-          <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
-        </div>
-        <!-- Maximize -->
-        <div class="win-btn">
-          <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" rx="0" stroke="currentColor" fill="none"/></svg>
-        </div>
-        <!-- Close -->
-        <div class="win-btn close">
-          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        </div>
-      </div>
-    </div>
-    <!-- Address bar -->
-    <div class="browser-chrome">
-      <!-- back -->
-      <div class="chrome-btn">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <!-- forward -->
-      <div class="chrome-btn" style="opacity:0.3">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <!-- reload -->
-      <div class="chrome-btn">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 8A5 5 0 1 1 8 3a5 5 0 0 1 3.54 1.46L13 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 6h3V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <div id="url-bar">
-        <svg class="url-lock" width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2" y="5" width="8" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V4a2 2 0 0 1 4 0v1" stroke="currentColor" stroke-width="1.2"/></svg>
-        <span class="url-text" id="url-text">Connecting…</span>
-      </div>
-    </div>
-    <div class="canvas-wrap" id="canvas-wrap">
-      <canvas id="garmin-canvas" tabindex="0"></canvas>
-    </div>
-    <div id="browser-status"><span class="spinner"></span>Opening Garmin login…</div>
-    <div id="success-banner"></div>
+  <div class="footer-links">
+    Already connected? <a href="/disconnect">Disconnect your account</a>
   </div>
+</div>
 
 <script>
 (function () {
   "use strict";
 
-  const BROWSER_W = 1200, BROWSER_H = 720;
+  let _sessionId = null;
+  let _email = "";
+  let _mcpUrl = "";
 
-  const landingCard  = document.getElementById("landing-card");
-  const browserView  = document.getElementById("browser-view");
-  const emailInput   = document.getElementById("email-input");
-  const connectBtn   = document.getElementById("connect-btn");
-  const errorBanner  = document.getElementById("error-banner");
-  const canvas       = document.getElementById("garmin-canvas");
-  const canvasWrap   = document.getElementById("canvas-wrap");
-  const urlBar       = document.getElementById("url-text");
-  const statusEl     = document.getElementById("browser-status");
-  const successBanner = document.getElementById("success-banner");
-  const ctx          = canvas.getContext("2d");
-
-  let ws = null;
-  let sessionId = null;
-  let emailForSession = "";
-  let scaleX = 1, scaleY = 1;
-
-  // ── Resize canvas to preserve aspect ratio ──────────────────────────────
-  function resizeCanvas() {
-    const maxW = Math.min(window.innerWidth - 32, 1220);
-    const w = maxW;
-    const h = Math.round(w * BROWSER_H / BROWSER_W);
-    canvas.width  = BROWSER_W;
-    canvas.height = BROWSER_H;
-    canvas.style.width  = w + "px";
-    canvas.style.height = h + "px";
-    scaleX = BROWSER_W / w;
-    scaleY = BROWSER_H / h;
-  }
-  resizeCanvas();
-  window.addEventListener("resize", resizeCanvas);
-
-  // ── Show error on landing card ──────────────────────────────────────────
-  function showError(msg) {
-    errorBanner.style.display = "block";
-    errorBanner.textContent = msg;
-    connectBtn.disabled = false;
-    emailInput.disabled = false;
+  function showStep(name) {
+    document.querySelectorAll(".step").forEach(el => el.classList.remove("active"));
+    document.getElementById("step-" + name).classList.add("active");
   }
 
-  // ── Connect button ──────────────────────────────────────────────────────
-  connectBtn.addEventListener("click", function () {
-    errorBanner.style.display = "none";
-    connectBtn.disabled = true;
-    emailInput.disabled = true;
-    emailForSession = (emailInput.value || "").trim();
-    startWebSocket();
-  });
-
-  // ── WebSocket lifecycle ─────────────────────────────────────────────────
-  function startWebSocket() {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(proto + "://" + location.host + "/api/setup/ws");
-    ws.binaryType = "arraybuffer";
-
-    ws.onopen = function () {
-      ws.send(JSON.stringify({ type: "start", email: emailForSession }));
-    };
-
-    ws.onmessage = function (evt) {
-      if (evt.data instanceof ArrayBuffer) {
-        // JPEG screenshot frame
-        renderFrame(evt.data);
-      } else {
-        try {
-          const msg = JSON.parse(evt.data);
-          handleServerMsg(msg);
-        } catch (e) { /* ignore */ }
-      }
-    };
-
-    ws.onerror = function () {
-      showError("WebSocket connection failed. Please refresh and try again.");
-    };
-
-    ws.onclose = function (evt) {
-      if (sessionId) return; // login_success already handled
-      if (!successBanner.style.display || successBanner.style.display === "none") {
-        showLandingWithError("Connection closed unexpectedly (code " + evt.code + "). Please try again.");
-      }
-    };
-  }
-
-  function showLandingWithError(msg) {
-    browserView.style.display = "none";
-    landingCard.style.display = "block";
-    connectBtn.disabled = false;
-    emailInput.disabled = false;
-    showError(msg);
-  }
-
-  // ── Handle server text messages ─────────────────────────────────────────
-  function handleServerMsg(msg) {
-    switch (msg.type) {
-      case "ready":
-        // Switch view from landing card to browser canvas
-        landingCard.style.display = "none";
-        browserView.style.display = "flex";
-        browserView.style.flexDirection = "column";
-        statusEl.innerHTML = '<span class="spinner"></span>Loading Garmin login page…';
-        canvas.focus();
-        break;
-
-      case "url":
-        urlBar.textContent = msg.url || "…";
-        if (msg.url && msg.url.includes("connect.garmin.com")) {
-          statusEl.textContent = "Logged in — saving your session…";
-        } else if (msg.url && msg.url.includes("sso.garmin.com")) {
-          statusEl.textContent = "Sign in to your Garmin account in the window above.";
-        }
-        break;
-
-      case "login_success":
-        sessionId = msg.session_id;
-        statusEl.innerHTML = '<span class="spinner"></span>Login detected — saving your MCP connection…';
-        completeSetup(msg.session_id);
-        break;
-
-      case "error":
-        showLandingWithError(msg.message || "An error occurred. Please try again.");
-        break;
+  function setLoading(btnId, statusId, loading, message) {
+    const btn = document.getElementById(btnId);
+    const status = document.getElementById(statusId);
+    btn.disabled = loading;
+    if (loading) {
+      btn.innerHTML = '<span class="spinner"></span>' + (message || "Please wait…");
+      status.textContent = "";
+    } else {
+      btn.innerHTML = btn.dataset.label || btn.textContent;
     }
   }
 
-  // ── Render JPEG frame ───────────────────────────────────────────────────
-  function renderFrame(buffer) {
-    const blob = new Blob([buffer], { type: "image/jpeg" });
-    const url  = URL.createObjectURL(blob);
-    const img  = new Image();
-    img.onload = function () {
-      ctx.drawImage(img, 0, 0, BROWSER_W, BROWSER_H);
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
+  function showError(bannerId, message) {
+    const el = document.getElementById(bannerId);
+    el.style.display = "block";
+    el.textContent = message;
   }
 
-  // ── Mouse events ────────────────────────────────────────────────────────
-  function canvasCoords(e) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top)  * scaleY,
-    };
+  function hideError(bannerId) {
+    document.getElementById(bannerId).style.display = "none";
   }
 
-  canvas.addEventListener("click", function (e) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const { x, y } = canvasCoords(e);
-    ws.send(JSON.stringify({ type: "click", x, y }));
-    canvas.focus();
-  });
+  // ── Step 1: submit credentials ──────────────────────────────────────────
+  window.submitLogin = async function () {
+    const email    = document.getElementById("email-input").value.trim();
+    const password = document.getElementById("password-input").value;
 
-  canvas.addEventListener("mousemove", function (e) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const { x, y } = canvasCoords(e);
-    ws.send(JSON.stringify({ type: "mousemove", x, y }));
-  });
-
-  canvas.addEventListener("wheel", function (e) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    e.preventDefault();
-    const { x, y } = canvasCoords(e);
-    ws.send(JSON.stringify({ type: "scroll", x, y, deltaY: e.deltaY }));
-  }, { passive: false });
-
-  // ── Keyboard events ─────────────────────────────────────────────────────
-  const NAMED_KEYS = new Set([
-    "Enter", "Backspace", "Tab", "Escape", "Delete",
-    "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-    "Home", "End", "PageUp", "PageDown", "Space",
-    "F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12",
-  ]);
-
-  canvas.addEventListener("keydown", function (e) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // Suppress browser shortcuts that would navigate away
-    if (e.key === "F5" || (e.ctrlKey && ["r","w","t","l"].includes(e.key.toLowerCase()))) {
-      e.preventDefault();
+    if (!email || !password) {
+      showError("cred-error", "Please enter your email and password.");
+      return;
     }
-    let key = e.key;
-    if (NAMED_KEYS.has(key) || key.length > 1) {
-      // Named key
-      ws.send(JSON.stringify({ type: "key", key }));
-      e.preventDefault();
-    } else if (key.length === 1 && !e.ctrlKey && !e.metaKey) {
-      // Printable character — type it
-      ws.send(JSON.stringify({ type: "key", key }));
-      e.preventDefault();
-    }
-  });
 
-  // ── POST /api/setup/complete ────────────────────────────────────────────
-  async function completeSetup(sid) {
+    _email = email;
+    hideError("cred-error");
+
+    // Save label before replacing with spinner
+    const btn = document.getElementById("login-btn");
+    btn.dataset.label = "Sign in to Garmin";
+    setLoading("login-btn", "cred-status", true, "Signing in — this may take up to 60 seconds…");
+    document.getElementById("email-input").disabled = true;
+    document.getElementById("password-input").disabled = true;
+
     try {
-      const res = await fetch("/api/setup/complete", {
+      const res = await fetch("/api/setup/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sid, email: emailForSession }),
+        body: JSON.stringify({ email, password }),
       });
+
       const data = await res.json();
+
       if (!res.ok) {
-        statusEl.textContent = "Error: " + (data.error || res.statusText);
+        restoreCredForm();
+        showError("cred-error", data.error || "Login failed. Please check your credentials and try again.");
         return;
       }
-      showSuccess(data.mcp_url);
+
+      if (data.state === "mfa_required") {
+        _sessionId = data.session_id;
+        setLoading("login-btn", "cred-status", false);
+        showStep("mfa");
+        document.getElementById("mfa-btn").dataset.label = "Verify";
+        document.getElementById("mfa-input").focus();
+        return;
+      }
+
+      if (data.state === "success") {
+        _mcpUrl = data.mcp_url;
+        document.getElementById("mcp-url-text").textContent = _mcpUrl;
+        showStep("success");
+        return;
+      }
+
+      restoreCredForm();
+      showError("cred-error", data.error || "Unexpected response from server.");
+
     } catch (err) {
-      statusEl.textContent = "Network error — please refresh and try again.";
+      restoreCredForm();
+      showError("cred-error", "Network error — please check your connection and try again.");
     }
+  };
+
+  function restoreCredForm() {
+    setLoading("login-btn", "cred-status", false);
+    document.getElementById("email-input").disabled = false;
+    document.getElementById("password-input").disabled = false;
   }
 
-  // ── Show success banner with MCP URL ────────────────────────────────────
-  function showSuccess(mcpUrl) {
-    statusEl.textContent = "Connected!";
-    successBanner.style.display = "block";
-    successBanner.innerHTML =
-      "<strong>Your Garmin account is connected.</strong> " +
-      "Copy the MCP URL below and paste it into your AI client (Claude Desktop, ChatGPT, etc.)." +
-      '<div class="mcp-url-box" id="mcp-url-text">' + escHtml(mcpUrl) + "</div>" +
-      '<button class="copy-btn" id="copy-btn">Copy URL</button>';
+  // ── Step 2: submit MFA code ─────────────────────────────────────────────
+  window.submitMfa = async function () {
+    const code = document.getElementById("mfa-input").value.trim();
 
-    document.getElementById("copy-btn").addEventListener("click", function () {
-      navigator.clipboard.writeText(mcpUrl).then(function () {
-        document.getElementById("copy-btn").textContent = "Copied!";
-        setTimeout(function () {
-          document.getElementById("copy-btn").textContent = "Copy URL";
-        }, 2000);
+    if (!code) {
+      showError("mfa-error", "Please enter your verification code.");
+      return;
+    }
+
+    hideError("mfa-error");
+    const btn = document.getElementById("mfa-btn");
+    btn.dataset.label = "Verify";
+    setLoading("mfa-btn", "mfa-status", true, "Verifying…");
+
+    try {
+      const res = await fetch("/api/setup/mfa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: _sessionId, code, email: _email }),
       });
-    });
-  }
 
-  function escHtml(s) {
-    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
+      const data = await res.json();
+
+      if (!res.ok) {
+        setLoading("mfa-btn", "mfa-status", false);
+        showError("mfa-error", data.error || "Verification failed. Please try again.");
+        return;
+      }
+
+      if (data.state === "success") {
+        _mcpUrl = data.mcp_url;
+        document.getElementById("mcp-url-text").textContent = _mcpUrl;
+        showStep("success");
+        return;
+      }
+
+      setLoading("mfa-btn", "mfa-status", false);
+      showError("mfa-error", data.error || "Unexpected response. Please try again.");
+
+    } catch (err) {
+      setLoading("mfa-btn", "mfa-status", false);
+      showError("mfa-error", "Network error — please try again.");
+    }
+  };
+
+  // Allow Enter key to submit MFA
+  document.getElementById("mfa-input").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") window.submitMfa();
+  });
+
+  // ── Copy MCP URL ─────────────────────────────────────────────────────────
+  window.copyUrl = function () {
+    navigator.clipboard.writeText(_mcpUrl).then(function () {
+      const btn = document.getElementById("copy-btn");
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = "Copy URL"; }, 2000);
+    });
+  };
 
 })();
 </script>

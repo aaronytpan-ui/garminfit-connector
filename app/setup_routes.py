@@ -1,23 +1,19 @@
 """
 Web routes for the user-facing setup and disconnect flows.
 
-Auth model (server-side browser session):
-------------------------------------------
-Garmin's SSO is protected by Cloudflare Turnstile.  We run a headless
-Chromium browser on the server (via Playwright) and stream it to the user's
-browser as an interactive view.  The user sees and controls the Garmin login
-page directly — no local tooling required.
+Auth model (SeleniumBase UC):
+------------------------------
+Login credentials are submitted via a plain HTML form. A background thread
+runs SeleniumBase UC (undetected Chrome) to authenticate with Garmin's SSO,
+bypassing Cloudflare without a residential proxy. On headless Linux (Railway)
+it uses a virtual X display (xvfb) rather than Chrome's headless flag.
 
 Setup flow
 ----------
-1. GET  /setup           — setup page with email input + "Connect" button
-2. WS   /api/setup/ws    — opens WebSocket; server creates Chromium session,
-                           streams JPEG screenshots (binary frames) and JSON
-                           control messages (text frames); client forwards
-                           mouse/keyboard events as JSON text frames
-3. POST /api/setup/complete — called by JS after WS signals login_success;
-                              saves cookies → returns {"mcp_url": ...}
-4. POST /api/disconnect   — revoke by email
+1. GET  /setup              — multi-step form: credentials → MFA (if needed) → success
+2. POST /api/setup/login    — starts UC login; blocks until mfa_required/success/error
+3. POST /api/setup/mfa      — supplies MFA code to waiting session; returns mcp_url
+4. POST /api/disconnect     — revoke by email
 
 Other routes
 ------------
@@ -25,10 +21,11 @@ GET  /            → redirect to /setup
 GET  /disconnect  → disconnect form
 GET  /health      → Railway health check
 GET  /debug/mcp   → MCP session diagnostics
+POST /api/setup/import-token → register session from external script
 """
 
 import asyncio
-import json
+import logging
 import os
 from datetime import datetime
 
@@ -36,26 +33,14 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
-from starlette.routing import Route, WebSocketRoute
-from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+from starlette.routing import Route
 
 from app.auth_manager import encrypt_token, generate_access_token
-from app.browser_session import (
-    close_session,
-    create_session,
-    get_screenshot,
-    get_current_url,
-    handle_click,
-    handle_key,
-    handle_mouse_move,
-    handle_scroll,
-    poll_login,
-    pop_session_data,
-    store_login_data,
-)
 from app.database import SessionLocal, User
 from app.garmin_api_client import GarminApiClient
+from app.uc_session import create_uc_session, get_uc_session, remove_uc_session
 
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Jinja2 template environment
@@ -144,141 +129,64 @@ async def debug_mcp(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# WebSocket: stream browser session to user
+# POST /api/setup/login  — step 1: submit credentials
 # ---------------------------------------------------------------------------
 
-async def browser_ws(websocket: WebSocket) -> None:
+async def api_setup_login(request: Request) -> JSONResponse:
     """
-    WebSocket endpoint that drives a server-side Chromium browser.
+    Start a SeleniumBase UC login session with the provided credentials.
 
-    Binary frames  → JPEG screenshots sent to the client (~7 fps)
-    Text frames    → JSON control messages to/from client
+    Blocks until the browser either reaches Garmin Connect (success),
+    hits an MFA page (mfa_required), or fails (error). Typically 20-60s.
 
-    Client → server text events:
-      {"type": "click",      "x": float, "y": float}
-      {"type": "mousemove",  "x": float, "y": float}
-      {"type": "key",        "key": str}
-      {"type": "scroll",     "x": float, "y": float, "deltaY": float}
-      {"type": "start",      "email": str}   ← first message from client
-
-    Server → client text events:
-      {"type": "ready"}
-      {"type": "url",          "url": str}
-      {"type": "login_success","session_id": str}
-      {"type": "error",        "message": str}
+    Request body: {"email": str, "password": str}
+    Response (success):      {"state": "success", "mcp_url": str}
+    Response (MFA required): {"state": "mfa_required", "session_id": str}
+    Response (error):        {"error": str}
     """
-    await websocket.accept()
-
-    session_id: str | None = None
-
-    # ---- wait for the start message with (optional) email
     try:
-        raw = await asyncio.wait_for(websocket.receive_text(), timeout=15)
-        msg = json.loads(raw)
-        if msg.get("type") != "start":
-            await websocket.send_text(json.dumps({"type": "error", "message": "Expected start message"}))
-            await websocket.close()
-            return
-        email = (msg.get("email") or "").strip()
-    except (asyncio.TimeoutError, Exception) as exc:
-        await websocket.send_text(json.dumps({"type": "error", "message": f"Setup error: {exc}"}))
-        await websocket.close()
-        return
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
-    # ---- create the browser session
-    session_id = await create_session(prefill_email=email)
-    if not session_id:
-        await websocket.send_text(json.dumps({
-            "type": "error",
-            "message": "Server is busy — all browser slots are in use. Please try again in a minute.",
-        }))
-        await websocket.close()
-        return
+    email    = (body.get("email")    or "").strip()
+    password = (body.get("password") or "").strip()
 
-    await websocket.send_text(json.dumps({"type": "ready"}))
+    if not email or not password:
+        return JSONResponse({"error": "Email and password are required"}, status_code=400)
 
-    # ---- concurrent tasks: receive events + stream screenshots
-    login_result: dict | None = None
-    stop_event = asyncio.Event()
+    loop = asyncio.get_event_loop()
+    session = create_uc_session(email, password)
 
-    async def recv_task() -> None:
-        """Read mouse/keyboard events from the client."""
-        try:
-            while not stop_event.is_set():
-                try:
-                    raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                event = json.loads(raw)
-                etype = event.get("type")
-                if etype == "click":
-                    await handle_click(session_id, event["x"], event["y"])
-                elif etype == "mousemove":
-                    await handle_mouse_move(session_id, event["x"], event["y"])
-                elif etype == "key":
-                    await handle_key(session_id, event["key"])
-                elif etype == "scroll":
-                    await handle_scroll(session_id, event["x"], event["y"], event.get("deltaY", 0))
-        except (WebSocketDisconnect, Exception):
-            stop_event.set()
+    # Wait for the browser thread to signal a state change (non-blocking)
+    new_state = await loop.run_in_executor(None, session.wait_for_state_change, 120)
 
-    async def stream_task() -> None:
-        """Send screenshots and check for login success."""
-        nonlocal login_result
-        try:
-            while not stop_event.is_set():
-                # Check for login success first (cheaper than screenshot)
-                result = await poll_login(session_id)
-                if result:
-                    login_result = result
-                    store_login_data(session_id, result)
-                    await websocket.send_text(json.dumps({
-                        "type": "login_success",
-                        "session_id": session_id,
-                    }))
-                    stop_event.set()
-                    return
+    if new_state == "mfa_required":
+        return JSONResponse({"state": "mfa_required", "session_id": session.session_id})
 
-                # Stream screenshot
-                screenshot = await get_screenshot(session_id)
-                if screenshot and websocket.client_state == WebSocketState.CONNECTED:
-                    try:
-                        await websocket.send_bytes(screenshot)
-                    except Exception:
-                        stop_event.set()
-                        return
+    if new_state == "success":
+        mcp_url = await _finalize_session(request, session, email)
+        remove_uc_session(session.session_id)
+        if mcp_url is None:
+            return JSONResponse({"error": "Login succeeded but failed to save account"}, status_code=500)
+        return JSONResponse({"state": "success", "mcp_url": mcp_url})
 
-                # Send current URL so the client can show a status bar
-                url = await get_current_url(session_id)
-                if websocket.client_state == WebSocketState.CONNECTED:
-                    try:
-                        await websocket.send_text(json.dumps({"type": "url", "url": url}))
-                    except Exception:
-                        stop_event.set()
-                        return
-
-                await asyncio.sleep(0.14)  # ~7 fps
-        except Exception:
-            stop_event.set()
-
-    try:
-        await asyncio.gather(recv_task(), stream_task())
-    finally:
-        # Don't close the session yet — /api/setup/complete still needs it
-        if not login_result:
-            await close_session(session_id)
+    # error or timeout
+    remove_uc_session(session.session_id)
+    return JSONResponse({"error": session.error or "Login failed — please try again"}, status_code=400)
 
 
 # ---------------------------------------------------------------------------
-# POST /api/setup/complete  — save cookies after WebSocket login_success
+# POST /api/setup/mfa  — step 2 (optional): submit MFA code
 # ---------------------------------------------------------------------------
 
-async def api_setup_complete(request: Request) -> JSONResponse:
+async def api_setup_mfa(request: Request) -> JSONResponse:
     """
-    Called by the frontend after the WebSocket signals login_success.
+    Submit an MFA code to a pending login session.
 
-    Request body: {"session_id": str, "email": str}
-    Response:     {"mcp_url": str}
+    Request body: {"session_id": str, "code": str, "email": str}
+    Response (success): {"state": "success", "mcp_url": str}
+    Response (error):   {"error": str}
     """
     try:
         body = await request.json()
@@ -286,47 +194,71 @@ async def api_setup_complete(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
     session_id = (body.get("session_id") or "").strip()
-    email = (body.get("email") or "").strip()
+    code       = (body.get("code")       or "").strip()
+    email      = (body.get("email")      or "").strip()
 
-    if not session_id:
-        return JSONResponse({"error": "session_id is required"}, status_code=400)
+    if not session_id or not code:
+        return JSONResponse({"error": "session_id and code are required"}, status_code=400)
 
-    # Retrieve the login data stored by the WebSocket stream task
-    login_data = pop_session_data(session_id)
-    if not login_data:
+    session = get_uc_session(session_id)
+    if not session:
         return JSONResponse(
-            {"error": "Session not found or login not completed. Please try again."},
+            {"error": "Session not found or expired — please start setup again"},
             status_code=404,
         )
 
-    cookies = login_data.get("cookies", {})
-    display_name = login_data.get("display_name", "")
+    loop = asyncio.get_event_loop()
 
-    # If email wasn't in the form, derive it from display_name as a fallback
-    if not email:
-        email = f"{display_name}@garmin" if display_name else "unknown@garmin"
+    # Unblock the login thread with the MFA code, then wait for the result
+    session.submit_mfa(code)
+    new_state = await loop.run_in_executor(None, session.wait_for_state_change, 120)
 
-    # Persist updated display_name in the token
-    token_json = GarminApiClient(cookies=cookies, display_name=display_name).dumps()
+    if new_state == "success":
+        effective_email = email or session.email
+        mcp_url = await _finalize_session(request, session, effective_email)
+        remove_uc_session(session.session_id)
+        if mcp_url is None:
+            return JSONResponse({"error": "MFA succeeded but failed to save account"}, status_code=500)
+        return JSONResponse({"state": "success", "mcp_url": mcp_url})
 
-    try:
-        mcp_url = await _save_user_and_get_url(request, token_json, display_name, email)
-    except Exception as exc:
-        return JSONResponse({"error": f"Failed to save account: {exc}"}, status_code=500)
-    finally:
-        # Always close the browser once we're done with it
-        await close_session(session_id)
-
-    return JSONResponse({"mcp_url": mcp_url})
+    remove_uc_session(session.session_id)
+    return JSONResponse({"error": session.error or "MFA verification failed"}, status_code=400)
 
 
 # ---------------------------------------------------------------------------
-# POST /api/setup/import-token  — for the playwright_setup.py script (kept)
+# Internal: build token JSON and persist to DB
+# ---------------------------------------------------------------------------
+
+async def _finalize_session(
+    request: Request,
+    session,
+    email: str,
+) -> str | None:
+    """Convert a successful UCLoginSession into a stored user + MCP URL."""
+    if not session.result:
+        return None
+
+    cookies      = session.result.get("cookies", {})
+    display_name = session.result.get("display_name", "")
+
+    # Build the token JSON that GarminApiClient expects
+    token_json = GarminApiClient(cookies=cookies, display_name=display_name).dumps()
+
+    try:
+        return await _save_user_and_get_url(request, token_json, display_name, email)
+    except Exception as exc:
+        log.exception("Failed to persist user after successful login: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# POST /api/setup/import-token  — for the garmin_givemydata / local scripts
 # ---------------------------------------------------------------------------
 
 async def api_setup_import_token(request: Request) -> JSONResponse:
     """
-    Register a Garmin session obtained externally (e.g. scripts/playwright_setup.py).
+    Register a Garmin session obtained externally (e.g. garmin_givemydata,
+    scripts/playwright_setup.py, or any tool that exports Garmin cookies).
 
     Request body: {"email": str, "token": str}
       token — JSON: {"cookies": {name: value, ...}, "display_name": str}
@@ -346,9 +278,6 @@ async def api_setup_import_token(request: Request) -> JSONResponse:
 
     def _validate(token_str: str):
         client = GarminApiClient.from_token(token_str)
-        # Best-effort: try to refresh display_name from the live API.
-        # If the call fails (CSRF issue, network, etc.) keep whatever
-        # display_name was embedded in the token by the local script.
         try:
             data = client._get("/userprofile-service/socialProfile")
             display_name = (
@@ -359,8 +288,7 @@ async def api_setup_import_token(request: Request) -> JSONResponse:
             if display_name:
                 client.display_name = display_name
         except Exception as exc:
-            print(f"[import-token] live validation skipped ({exc!s:.120}); "
-                  "using display_name from token")
+            log.info("import-token live validation skipped (%s); using display_name from token", exc)
         return client.display_name, client.dumps()
 
     try:
@@ -432,8 +360,8 @@ setup_routes = [
     Route("/disconnect", disconnect_page, methods=["GET"]),
     Route("/health", health_check, methods=["GET"]),
     Route("/debug/mcp", debug_mcp, methods=["GET"]),
-    WebSocketRoute("/api/setup/ws", browser_ws),
-    Route("/api/setup/complete", api_setup_complete, methods=["POST"]),
+    Route("/api/setup/login", api_setup_login, methods=["POST"]),
+    Route("/api/setup/mfa", api_setup_mfa, methods=["POST"]),
     Route("/api/setup/import-token", api_setup_import_token, methods=["POST"]),
     Route("/api/disconnect", api_disconnect, methods=["POST"]),
 ]

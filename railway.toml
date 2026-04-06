@@ -1,10 +1,13 @@
 [build]
-buildCommand = "pip install -r requirements.txt && playwright install chromium --with-deps && apt-get install -y xvfb 2>/dev/null || true"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-# Start a virtual X display so Chromium runs in headed mode and passes
-# Cloudflare Turnstile fingerprint checks. Sleep 1 gives Xvfb time to
-# initialize before the first browser session is created.
+# Start Xvfb on display :99 before the app so SeleniumBase UC has a real
+# X display to attach to. Chrome's built-in --headless mode fails Cloudflare
+# fingerprint checks; a virtual X display is required.
+# DISPLAY=:99 tells the Python process (and Chrome) which display to use.
+# SeleniumBase sees DISPLAY set and skips its own Xvfb startup.
 startCommand = "Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX +render -noreset & sleep 1 && DISPLAY=:99 PYTHONUNBUFFERED=1 uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level warning"
 healthcheckPath = "/health"
 healthcheckTimeout = 60

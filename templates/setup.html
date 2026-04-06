@@ -12,9 +12,9 @@
       background: #0D0D1C;
       min-height: 100vh;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
-      padding: 1.5rem;
+      padding: 2rem 1.5rem 3rem;
     }
     .card {
       background: #16162A;
@@ -22,7 +22,7 @@
       border-radius: 12px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.5);
       padding: 2.5rem;
-      max-width: 480px;
+      max-width: 540px;
       width: 100%;
     }
     .logo { margin-bottom: 0.75rem; }
@@ -30,133 +30,110 @@
     h1 { font-size: 1.5rem; font-weight: 700; color: #E8EAF2; margin-bottom: 0.25rem; }
     .subtitle { color: #8A90AA; font-size: 0.95rem; margin-bottom: 1.75rem; }
 
-    label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #C0C4D8;
-      margin-bottom: 0.4rem;
-    }
-    input[type="email"],
-    input[type="password"],
-    input[type="text"] {
-      width: 100%;
-      background: #0D0D1A;
-      border: 1px solid #2A2A46;
-      border-radius: 8px;
-      color: #E8EAF2;
-      font-size: 0.95rem;
-      padding: 0.6rem 0.85rem;
-      outline: none;
-      margin-bottom: 1rem;
-      transition: border-color 0.15s;
-    }
-    input:focus { border-color: #5CC98A; }
-    input::placeholder { color: #5A5F78; }
-    input:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* ── Steps ── */
+    .steps { display: flex; flex-direction: column; gap: 1.25rem; }
 
-    .btn {
-      width: 100%;
+    .step-block {
+      background: #111120;
+      border: 1px solid #202038;
+      border-radius: 10px;
+      padding: 1.1rem 1.25rem;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px; height: 22px;
+      background: #1D7A4A;
+      border-radius: 50%;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #E8F8EE;
+      margin-right: 0.5rem;
+      flex-shrink: 0;
+    }
+    .step-title {
+      display: flex;
+      align-items: center;
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: #C8CADE;
+      margin-bottom: 0.6rem;
+    }
+    .step-body {
+      font-size: 0.875rem;
+      color: #8A90AA;
+      line-height: 1.6;
+    }
+
+    /* ── Code blocks ── */
+    .code-wrap {
+      position: relative;
+      margin-top: 0.6rem;
+    }
+    .code-block {
+      background: #0D0D1A;
+      border: 1px solid #252545;
+      border-radius: 7px;
+      padding: 0.65rem 2.8rem 0.65rem 0.9rem;
+      font-size: 0.8rem;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      color: #A8B4E0;
+      word-break: break-all;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 0.4rem;
+      right: 0.4rem;
+      background: #1D2A4A;
+      border: 1px solid #2A3A60;
+      border-radius: 5px;
+      color: #6080C0;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.55rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { background: #22347A; color: #90B0E8; }
+
+    /* ── Download button ── */
+    .btn-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
       background: #1D7A4A;
       color: #E8F8EE;
       border: none;
       border-radius: 8px;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       font-weight: 600;
-      padding: 0.7rem 1rem;
+      padding: 0.6rem 1.1rem;
       cursor: pointer;
-      transition: background 0.15s, opacity 0.15s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
+      text-decoration: none;
+      margin-top: 0.65rem;
+      transition: background 0.15s;
     }
-    .btn:hover:not(:disabled) { background: #22934F; }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-download:hover { background: #22934F; }
 
-    .spinner {
-      display: inline-block;
-      width: 16px; height: 16px;
-      border: 2px solid rgba(232,248,238,0.3);
-      border-top-color: #E8F8EE;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      flex-shrink: 0;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .status-msg {
-      font-size: 0.82rem;
-      color: #8A90AA;
-      text-align: center;
-      margin-top: 0.75rem;
-      min-height: 1.2em;
-    }
-
-    .info-banner {
-      background: #111E1A;
-      border: 1px solid #1E3830;
-      border-left: 3px solid #5CC98A;
+    /* ── Info callout ── */
+    .callout {
+      background: #111820;
+      border: 1px solid #1A2E40;
+      border-left: 3px solid #4A90C8;
       border-radius: 8px;
-      padding: 0.9rem 1rem;
-      font-size: 0.875rem;
-      color: #7AD4A0;
+      padding: 0.8rem 1rem;
+      font-size: 0.84rem;
+      color: #6AAAD8;
       margin-bottom: 1.5rem;
       line-height: 1.55;
     }
-    .info-banner strong { color: #5CC98A; }
+    .callout strong { color: #90C8F0; }
 
-    .error-banner {
-      display: none;
-      background: #1E1010;
-      border: 1px solid #3A1818;
-      border-left: 3px solid #CC4444;
-      border-radius: 8px;
-      padding: 0.85rem 1rem;
-      font-size: 0.875rem;
-      color: #E08080;
-      margin-bottom: 1rem;
-      line-height: 1.5;
-    }
-
-    .success-banner {
-      display: none;
-      background: #111E1A;
-      border: 1px solid #1E3830;
-      border-left: 3px solid #5CC98A;
-      border-radius: 8px;
-      padding: 1rem 1.1rem;
-      font-size: 0.9rem;
-      color: #7AD4A0;
-      line-height: 1.6;
-    }
-    .success-banner strong { color: #5CC98A; }
-
-    .mcp-url-box {
-      background: #0D0D1A;
-      border: 1px solid #2A2A46;
-      border-radius: 6px;
-      padding: 0.6rem 0.9rem;
-      font-size: 0.8rem;
-      color: #A8B4E0;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      word-break: break-all;
-      margin: 0.6rem 0 0.4rem;
-    }
-    .copy-btn {
-      background: #1D3A5A;
-      border: 1px solid #2A4A6A;
-      border-radius: 6px;
-      color: #80B0E0;
-      font-size: 0.78rem;
-      padding: 0.3rem 0.75rem;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .copy-btn:hover { background: #234470; }
-
+    /* ── Footer ── */
     .footer-links {
-      margin-top: 1.5rem;
+      margin-top: 1.75rem;
       text-align: center;
       font-size: 0.8rem;
       color: #5A5F78;
@@ -164,9 +141,9 @@
     .footer-links a { color: #7080B8; text-decoration: none; }
     .footer-links a:hover { color: #A0B0D8; text-decoration: underline; }
 
-    /* Step visibility */
-    .step { display: none; }
-    .step.active { display: block; }
+    /* ── Run command highlight ── */
+    .run-cmd .code-block { border-color: #2A3820; }
+    .run-cmd .code-block { color: #7AD4A0; }
   </style>
 </head>
 <body>
@@ -174,58 +151,69 @@
 <div class="card">
   <div class="logo"><img src="/static/icon.ico" alt="Garmin Chat Connector" /></div>
   <h1>Garmin Chat Connector</h1>
-  <p class="subtitle">Connect your Garmin account to Claude, ChatGPT, and other AI chat tools.</p>
+  <p class="subtitle">Connect your Garmin account to Claude and other AI tools.</p>
 
-  <!-- ── Step 1: Credentials ── -->
-  <div class="step active" id="step-credentials">
-    <div class="info-banner">
-      <strong>Sign in with your Garmin account.</strong>
-      Your credentials are used only to authenticate with Garmin — they are
-      never stored. A session token is saved so Claude can query your data.
-    </div>
-
-    <div class="error-banner" id="cred-error"></div>
-
-    <label for="email-input">Garmin email</label>
-    <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email" />
-
-    <label for="password-input">Password</label>
-    <input type="password" id="password-input" placeholder="••••••••" autocomplete="current-password" />
-
-    <button class="btn" id="login-btn" onclick="submitLogin()">
-      Sign in to Garmin
-    </button>
-    <div class="status-msg" id="cred-status"></div>
+  <div class="callout">
+    <strong>How it works:</strong> A small Python script runs on your computer,
+    opens Garmin Connect in Chrome, and logs in on your behalf. It sends only
+    the session cookies to this server — your password is never transmitted.
   </div>
 
-  <!-- ── Step 2: MFA ── -->
-  <div class="step" id="step-mfa">
-    <div class="info-banner">
-      <strong>Two-factor authentication required.</strong>
-      Enter the verification code from your authenticator app or SMS.
+  <div class="steps">
+
+    <!-- Step 1: Install -->
+    <div class="step-block">
+      <div class="step-title"><span class="step-num">1</span> Install the requirements (once)</div>
+      <div class="step-body">
+        Open a terminal and run:
+        <div class="code-wrap">
+          <div class="code-block" id="cmd-install">pip install seleniumbase
+seleniumbase install chromedriver</div>
+          <button class="copy-btn" onclick="copyCode('cmd-install', this)">Copy</button>
+        </div>
+      </div>
     </div>
 
-    <div class="error-banner" id="mfa-error"></div>
-
-    <label for="mfa-input">Verification code</label>
-    <input type="text" id="mfa-input" placeholder="123456" autocomplete="one-time-code"
-           inputmode="numeric" maxlength="8" />
-
-    <button class="btn" id="mfa-btn" onclick="submitMfa()">
-      Verify
-    </button>
-    <div class="status-msg" id="mfa-status"></div>
-  </div>
-
-  <!-- ── Step 3: Success ── -->
-  <div class="step" id="step-success">
-    <div class="success-banner" id="success-banner" style="display:block;">
-      <strong>Your Garmin account is connected.</strong>
-      Copy the MCP URL below and paste it into your AI client (Claude Desktop, Claude.ai, etc.).
-      <div class="mcp-url-box" id="mcp-url-text"></div>
-      <button class="copy-btn" id="copy-btn" onclick="copyUrl()">Copy URL</button>
+    <!-- Step 2: Download script -->
+    <div class="step-block">
+      <div class="step-title"><span class="step-num">2</span> Download the setup script</div>
+      <div class="step-body">
+        Save this file somewhere easy to find, like your Desktop or Downloads folder.
+        <br/>
+        <a class="btn-download" href="/download/garmin_setup.py" download="garmin_setup.py">
+          ↓ &nbsp;Download garmin_setup.py
+        </a>
+      </div>
     </div>
-  </div>
+
+    <!-- Step 3: Run -->
+    <div class="step-block">
+      <div class="step-title"><span class="step-num">3</span> Run the script</div>
+      <div class="step-body">
+        In your terminal, navigate to where you saved the script and run:
+        <div class="code-wrap run-cmd">
+          <div class="code-block" id="cmd-run">python garmin_setup.py --server-url <span id="server-url-placeholder">https://your-app.up.railway.app</span></div>
+          <button class="copy-btn" onclick="copyCode('cmd-run', this)">Copy</button>
+        </div>
+        Chrome will open and log you in. Enter your MFA code if prompted.
+      </div>
+    </div>
+
+    <!-- Step 4: Copy URL -->
+    <div class="step-block">
+      <div class="step-title"><span class="step-num">4</span> Paste your MCP URL into Claude</div>
+      <div class="step-body">
+        When the script finishes it will print a URL like:
+        <div class="code-wrap">
+          <div class="code-block">https://your-app.up.railway.app/garmin/?token=abc123…</div>
+        </div>
+        Paste that URL into <strong style="color:#C0C4D8">Claude Desktop</strong>,
+        <strong style="color:#C0C4D8">Claude.ai</strong>, or any MCP-compatible client as
+        your Garmin connector URL.
+      </div>
+    </div>
+
+  </div><!-- /steps -->
 
   <div class="footer-links">
     Already connected? <a href="/disconnect">Disconnect your account</a>
@@ -234,164 +222,22 @@
 
 <script>
 (function () {
-  "use strict";
-
-  let _sessionId = null;
-  let _email = "";
-  let _mcpUrl = "";
-
-  function showStep(name) {
-    document.querySelectorAll(".step").forEach(el => el.classList.remove("active"));
-    document.getElementById("step-" + name).classList.add("active");
+  // Auto-fill the server URL in the run command
+  var origin = window.location.origin;
+  var el = document.getElementById("server-url-placeholder");
+  if (el && origin) {
+    el.textContent = origin;
   }
 
-  function setLoading(btnId, statusId, loading, message) {
-    const btn = document.getElementById(btnId);
-    const status = document.getElementById(statusId);
-    btn.disabled = loading;
-    if (loading) {
-      btn.innerHTML = '<span class="spinner"></span>' + (message || "Please wait…");
-      status.textContent = "";
-    } else {
-      btn.innerHTML = btn.dataset.label || btn.textContent;
-    }
-  }
-
-  function showError(bannerId, message) {
-    const el = document.getElementById(bannerId);
-    el.style.display = "block";
-    el.textContent = message;
-  }
-
-  function hideError(bannerId) {
-    document.getElementById(bannerId).style.display = "none";
-  }
-
-  // ── Step 1: submit credentials ──────────────────────────────────────────
-  window.submitLogin = async function () {
-    const email    = document.getElementById("email-input").value.trim();
-    const password = document.getElementById("password-input").value;
-
-    if (!email || !password) {
-      showError("cred-error", "Please enter your email and password.");
-      return;
-    }
-
-    _email = email;
-    hideError("cred-error");
-
-    // Save label before replacing with spinner
-    const btn = document.getElementById("login-btn");
-    btn.dataset.label = "Sign in to Garmin";
-    setLoading("login-btn", "cred-status", true, "Signing in — this may take up to 60 seconds…");
-    document.getElementById("email-input").disabled = true;
-    document.getElementById("password-input").disabled = true;
-
-    try {
-      const res = await fetch("/api/setup/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        restoreCredForm();
-        showError("cred-error", data.error || "Login failed. Please check your credentials and try again.");
-        return;
-      }
-
-      if (data.state === "mfa_required") {
-        _sessionId = data.session_id;
-        setLoading("login-btn", "cred-status", false);
-        showStep("mfa");
-        document.getElementById("mfa-btn").dataset.label = "Verify";
-        document.getElementById("mfa-input").focus();
-        return;
-      }
-
-      if (data.state === "success") {
-        _mcpUrl = data.mcp_url;
-        document.getElementById("mcp-url-text").textContent = _mcpUrl;
-        showStep("success");
-        return;
-      }
-
-      restoreCredForm();
-      showError("cred-error", data.error || "Unexpected response from server.");
-
-    } catch (err) {
-      restoreCredForm();
-      showError("cred-error", "Network error — please check your connection and try again.");
-    }
-  };
-
-  function restoreCredForm() {
-    setLoading("login-btn", "cred-status", false);
-    document.getElementById("email-input").disabled = false;
-    document.getElementById("password-input").disabled = false;
-  }
-
-  // ── Step 2: submit MFA code ─────────────────────────────────────────────
-  window.submitMfa = async function () {
-    const code = document.getElementById("mfa-input").value.trim();
-
-    if (!code) {
-      showError("mfa-error", "Please enter your verification code.");
-      return;
-    }
-
-    hideError("mfa-error");
-    const btn = document.getElementById("mfa-btn");
-    btn.dataset.label = "Verify";
-    setLoading("mfa-btn", "mfa-status", true, "Verifying…");
-
-    try {
-      const res = await fetch("/api/setup/mfa", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: _sessionId, code, email: _email }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setLoading("mfa-btn", "mfa-status", false);
-        showError("mfa-error", data.error || "Verification failed. Please try again.");
-        return;
-      }
-
-      if (data.state === "success") {
-        _mcpUrl = data.mcp_url;
-        document.getElementById("mcp-url-text").textContent = _mcpUrl;
-        showStep("success");
-        return;
-      }
-
-      setLoading("mfa-btn", "mfa-status", false);
-      showError("mfa-error", data.error || "Unexpected response. Please try again.");
-
-    } catch (err) {
-      setLoading("mfa-btn", "mfa-status", false);
-      showError("mfa-error", "Network error — please try again.");
-    }
-  };
-
-  // Allow Enter key to submit MFA
-  document.getElementById("mfa-input").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") window.submitMfa();
-  });
-
-  // ── Copy MCP URL ─────────────────────────────────────────────────────────
-  window.copyUrl = function () {
-    navigator.clipboard.writeText(_mcpUrl).then(function () {
-      const btn = document.getElementById("copy-btn");
+  // Copy-to-clipboard for code blocks
+  window.copyCode = function (elementId, btn) {
+    var text = document.getElementById(elementId).innerText.trim();
+    navigator.clipboard.writeText(text).then(function () {
+      var orig = btn.textContent;
       btn.textContent = "Copied!";
-      setTimeout(function () { btn.textContent = "Copy URL"; }, 2000);
+      setTimeout(function () { btn.textContent = orig; }, 2000);
     });
   };
-
 })();
 </script>
 </body>

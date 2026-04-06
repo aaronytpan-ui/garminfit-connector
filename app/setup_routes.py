@@ -1,19 +1,12 @@
 """
 Web routes for the user-facing setup and disconnect flows.
 
-Auth model (SeleniumBase UC):
-------------------------------
-Login credentials are submitted via a plain HTML form. A background thread
-runs SeleniumBase UC (undetected Chrome) to authenticate with Garmin's SSO,
-bypassing Cloudflare without a residential proxy. On headless Linux (Railway)
-it uses a virtual X display (xvfb) rather than Chrome's headless flag.
-
 Setup flow
 ----------
-1. GET  /setup              — multi-step form: credentials → MFA (if needed) → success
-2. POST /api/setup/login    — starts UC login; blocks until mfa_required/success/error
-3. POST /api/setup/mfa      — supplies MFA code to waiting session; returns mcp_url
-4. POST /api/disconnect     — revoke by email
+1. GET  /setup                  — instructions + script download
+2. GET  /download/garmin_setup  — download the local auth script
+3. POST /api/setup/import-token — register session from the local script
+4. POST /api/disconnect         — revoke by email
 
 Other routes
 ------------
@@ -21,10 +14,9 @@ GET  /            → redirect to /setup
 GET  /disconnect  → disconnect form
 GET  /health      → Railway health check
 GET  /debug/mcp   → MCP session diagnostics
-POST /api/setup/import-token → register session from external script
 """
 
-import asyncio
+import asyncio  # used by api_setup_import_token
 import logging
 import os
 from datetime import datetime
@@ -32,13 +24,12 @@ from datetime import datetime
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 from app.auth_manager import encrypt_token, generate_access_token
 from app.database import SessionLocal, User
 from app.garmin_api_client import GarminApiClient
-from app.uc_session import create_uc_session, get_uc_session, remove_uc_session
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +99,19 @@ async def setup_success_page(request: Request) -> HTMLResponse:
     return _render("success.html")
 
 
+async def download_garmin_setup(request: Request) -> FileResponse:
+    """Serve the local auth script as a file download."""
+    script_path = os.path.join(
+        os.path.dirname(__file__), "..", "scripts", "garmin_setup.py"
+    )
+    script_path = os.path.abspath(script_path)
+    return FileResponse(
+        path=script_path,
+        filename="garmin_setup.py",
+        media_type="text/x-python",
+    )
+
+
 async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "garminfit-connector"})
 
@@ -126,129 +130,6 @@ async def debug_mcp(request: Request) -> JSONResponse:
         })
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/setup/login  — step 1: submit credentials
-# ---------------------------------------------------------------------------
-
-async def api_setup_login(request: Request) -> JSONResponse:
-    """
-    Start a SeleniumBase UC login session with the provided credentials.
-
-    Blocks until the browser either reaches Garmin Connect (success),
-    hits an MFA page (mfa_required), or fails (error). Typically 20-60s.
-
-    Request body: {"email": str, "password": str}
-    Response (success):      {"state": "success", "mcp_url": str}
-    Response (MFA required): {"state": "mfa_required", "session_id": str}
-    Response (error):        {"error": str}
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-
-    email    = (body.get("email")    or "").strip()
-    password = (body.get("password") or "").strip()
-
-    if not email or not password:
-        return JSONResponse({"error": "Email and password are required"}, status_code=400)
-
-    loop = asyncio.get_event_loop()
-    session = create_uc_session(email, password)
-
-    # Wait for the browser thread to signal a state change (non-blocking)
-    new_state = await loop.run_in_executor(None, session.wait_for_state_change, 120)
-
-    if new_state == "mfa_required":
-        return JSONResponse({"state": "mfa_required", "session_id": session.session_id})
-
-    if new_state == "success":
-        mcp_url = await _finalize_session(request, session, email)
-        remove_uc_session(session.session_id)
-        if mcp_url is None:
-            return JSONResponse({"error": "Login succeeded but failed to save account"}, status_code=500)
-        return JSONResponse({"state": "success", "mcp_url": mcp_url})
-
-    # error or timeout
-    remove_uc_session(session.session_id)
-    return JSONResponse({"error": session.error or "Login failed — please try again"}, status_code=400)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/setup/mfa  — step 2 (optional): submit MFA code
-# ---------------------------------------------------------------------------
-
-async def api_setup_mfa(request: Request) -> JSONResponse:
-    """
-    Submit an MFA code to a pending login session.
-
-    Request body: {"session_id": str, "code": str, "email": str}
-    Response (success): {"state": "success", "mcp_url": str}
-    Response (error):   {"error": str}
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-
-    session_id = (body.get("session_id") or "").strip()
-    code       = (body.get("code")       or "").strip()
-    email      = (body.get("email")      or "").strip()
-
-    if not session_id or not code:
-        return JSONResponse({"error": "session_id and code are required"}, status_code=400)
-
-    session = get_uc_session(session_id)
-    if not session:
-        return JSONResponse(
-            {"error": "Session not found or expired — please start setup again"},
-            status_code=404,
-        )
-
-    loop = asyncio.get_event_loop()
-
-    # Unblock the login thread with the MFA code, then wait for the result
-    session.submit_mfa(code)
-    new_state = await loop.run_in_executor(None, session.wait_for_state_change, 120)
-
-    if new_state == "success":
-        effective_email = email or session.email
-        mcp_url = await _finalize_session(request, session, effective_email)
-        remove_uc_session(session.session_id)
-        if mcp_url is None:
-            return JSONResponse({"error": "MFA succeeded but failed to save account"}, status_code=500)
-        return JSONResponse({"state": "success", "mcp_url": mcp_url})
-
-    remove_uc_session(session.session_id)
-    return JSONResponse({"error": session.error or "MFA verification failed"}, status_code=400)
-
-
-# ---------------------------------------------------------------------------
-# Internal: build token JSON and persist to DB
-# ---------------------------------------------------------------------------
-
-async def _finalize_session(
-    request: Request,
-    session,
-    email: str,
-) -> str | None:
-    """Convert a successful UCLoginSession into a stored user + MCP URL."""
-    if not session.result:
-        return None
-
-    cookies      = session.result.get("cookies", {})
-    display_name = session.result.get("display_name", "")
-
-    # Build the token JSON that GarminApiClient expects
-    token_json = GarminApiClient(cookies=cookies, display_name=display_name).dumps()
-
-    try:
-        return await _save_user_and_get_url(request, token_json, display_name, email)
-    except Exception as exc:
-        log.exception("Failed to persist user after successful login: %s", exc)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -360,8 +241,7 @@ setup_routes = [
     Route("/disconnect", disconnect_page, methods=["GET"]),
     Route("/health", health_check, methods=["GET"]),
     Route("/debug/mcp", debug_mcp, methods=["GET"]),
-    Route("/api/setup/login", api_setup_login, methods=["POST"]),
-    Route("/api/setup/mfa", api_setup_mfa, methods=["POST"]),
+    Route("/download/garmin_setup.py", download_garmin_setup, methods=["GET"]),
     Route("/api/setup/import-token", api_setup_import_token, methods=["POST"]),
     Route("/api/disconnect", api_disconnect, methods=["POST"]),
 ]

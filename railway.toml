@@ -1,12 +1,8 @@
 [build]
-# pip install + chromedriver download only — system packages come from nixpacks.toml
-buildCommand = "pip install -r requirements.txt && seleniumbase install chromedriver latest"
+builder = "DOCKERFILE"
 
 [deploy]
-# LD_LIBRARY_PATH exposes nix-installed libs (libglib etc.) to SeleniumBase's
-# uc_driver binary, which is linked against standard glibc paths that nixpkgs
-# doesn't populate by default.
-startCommand = "Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX +render -noreset & sleep 1 && DISPLAY=:99 LD_LIBRARY_PATH=/root/.nix-profile/lib:$LD_LIBRARY_PATH PYTHONUNBUFFERED=1 uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level warning"
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level warning"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"

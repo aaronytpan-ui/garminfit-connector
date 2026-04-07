@@ -215,12 +215,20 @@ async def lifespan(app):
     # mcp.streamable_http_app() creates mcp._session_manager if it doesn't
     # exist yet (idempotent; we discard the returned Starlette app because
     # we call the session manager directly).
-    mcp.streamable_http_app()
-    log.warning("MCP session manager initialising")
+    try:
+        mcp.streamable_http_app()
+        log.warning("MCP session manager initialising")
+    except Exception as exc:
+        log.error("STARTUP FAILED at mcp.streamable_http_app(): %s", exc, exc_info=True)
+        raise
 
-    async with mcp.session_manager.run():
-        log.warning("MCP session manager started -- ready to accept connections")
-        yield
+    try:
+        async with mcp.session_manager.run():
+            log.warning("MCP session manager started -- ready to accept connections")
+            yield
+    except Exception as exc:
+        log.error("STARTUP FAILED in session_manager.run(): %s", exc, exc_info=True)
+        raise
 
     log.warning("MCP session manager stopped")
 
